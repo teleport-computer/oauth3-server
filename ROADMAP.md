@@ -3,7 +3,8 @@
 Umbrella tracker for the OAuth3 experiment (teleport exp 008). Work spans three
 repos — keep this file as the single source of truth and mirror it into GitHub
 issues once the repos are pushed (each `###` block below is issue-shaped: title,
-repo, why, acceptance).
+repo, why, acceptance). For *how it should feel* (UX bars per path + the apps that
+exercise them), see [USER-JOURNEYS.md](USER-JOURNEYS.md).
 
 Repos:
 - **teleport-plugins** — server + plugins (otter, youtube) + the page (`docs/`)
