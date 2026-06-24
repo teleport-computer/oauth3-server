@@ -160,12 +160,21 @@ approves → hands back a token. Zero tabs.
 app calls `oauth3.connect()`, one Connect click, wallet copies the jar to the TEE, app gets
 a token and reads 51 real Reddit items (`tok-reddit-1cbcc6c259e6…`). Cookies shredded after.
 
-### [M1.5] Passkey / TinyCloud sign-in (kill the last secret paste)
-**Repo:** teleport-plugins (+ oauth3-extension). Replace owner-secret login with a real
-per-user sign-in — passkey/WebAuthn (port from `oauth3-twitter-cookie`) or TinyCloud's
-signed-invocation identity. Plugs into the same `sessions.ts` layer (createSession keyed
-by a verified identity instead of "owner"). This is also the keystone for [M2] multi-tenant.
-**Acceptance:** sign in with a passkey (or TinyCloud) — no secret ever pasted; sessions per user.
+### [M1.5] TinyCloud / did:key sign-in (kill the last secret paste) — DONE (2026-06-24, live-verified)
+**Repo:** teleport-plugins. Added `did:key` (Ed25519) signed sign-in — TinyCloud's
+signed-invocation identity reduced to its core: `GET /api/login/challenge` → the browser
+signs the nonce with a key it keeps in localStorage (never sent) → `POST /api/login
+{did,challenge,signature}` → `verifyDidSignIn` (WebCrypto Ed25519, single-use challenge) →
+`subject = did:key:…`. No secret ever reaches the server. Plugs straight into the
+multi-tenant model (a DID is just another subject; jars/tokens scope to it).
+`server/identity.ts` (base58 did:key decode + challenge store + verify); login page's
+"Continue in this browser" now generates/uses the keypair (needs Chrome 137+ for Ed25519).
+**Verified:** crypto unit (valid→ok; replay/tamper/wrong-key/unknown-challenge→reject),
+HTTP local, and **LIVE** on the dstack node (tree_hash `b692e443…`): `did:key:z6MknYP…`
+subject, `/api/me` signed-in, forged signature→401, DID is its own fresh tenant.
+**Still optional (not imposed):** passkey/WebAuthn (port from `oauth3-twitter-cookie`) and
+full TinyCloud UCAN *capability* envelopes (did:pkh/SIWE + delegation) — both build on this
+same `createSession(subject)` layer. Neither is required; did:key already kills the paste.
 
 ---
 

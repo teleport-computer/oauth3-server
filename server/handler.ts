@@ -21,6 +21,7 @@ import { startScheduler } from "./scheduler.ts";
 import { approvePage } from "./approve-page.ts";
 import { loginPage } from "./login-page.ts";
 import { createSession, destroySession, initSessions, verifySession } from "./sessions.ts";
+import { newChallenge, verifyDidSignIn } from "./identity.ts";
 
 let ready = false;
 let ownerSecret = "";
@@ -88,14 +89,27 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   if (req.method === "GET" && path === "/login") {
     return html(loginPage(url.searchParams.get("return") || ""));
   }
+  // A nonce to sign for did:key sign-in (TinyCloud-style signed identity).
+  if (req.method === "GET" && path === "/api/login/challenge") {
+    return json({ challenge: newChallenge() });
+  }
   if (req.method === "POST" && path === "/api/login") {
     const body = await req.json().catch(() => null) as any;
-    // Default identity: a localStorage-held userKey (no passkey, no server-side account
-    // — the key in your browser is who you are). Owner secret is the admin/bootstrap path.
+    // Three identity paths, all → a session subject:
+    //   did:key   — sign a challenge with your key; server sees only DID + signature (best)
+    //   userKey   — a localStorage secret hashed into a subject (no passkey, no account)
+    //   owner     — the admin/bootstrap secret
     let subject = "";
-    if (typeof body?.userKey === "string" && body.userKey.length >= 16) subject = "u-" + await sha256hex(body.userKey);
-    else if (ownerSecret && body?.owner_secret === ownerSecret) subject = "owner";
-    else return json({ error: "provide a userKey (≥16 chars) or the owner secret" }, 401);
+    if (body?.did && body?.challenge && body?.signature) {
+      if (!await verifyDidSignIn(body.did, body.challenge, body.signature)) return json({ error: "bad signature or expired challenge" }, 401);
+      subject = body.did;
+    } else if (typeof body?.userKey === "string" && body.userKey.length >= 16) {
+      subject = "u-" + await sha256hex(body.userKey);
+    } else if (ownerSecret && body?.owner_secret === ownerSecret) {
+      subject = "owner";
+    } else {
+      return json({ error: "provide a signed did:key, a userKey (≥16 chars), or the owner secret" }, 401);
+    }
     const token = await createSession(subject);
     return json({ ok: true, subject, session: token });
   }

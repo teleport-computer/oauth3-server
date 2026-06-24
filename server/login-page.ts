@@ -19,7 +19,7 @@ export function loginPage(returnUrl: string): string {
 </style></head><body>
 <div class=card id=card>
   <h2>Sign in to your room</h2>
-  <div class=sub>This browser becomes your identity — no password, no passkey. Apps you approve get scoped tokens, never your cookies.</div>
+  <div class=sub>This browser holds a key that is your identity — no password, no passkey, and the key never leaves your device. Apps you approve get scoped tokens, never your cookies.</div>
   <button id=go>Continue in this browser</button>
   <div id=adv style="margin-top:14px;font-size:13px">
     <a href="#" id=tog style="color:#666">Sign in as owner instead</a>
@@ -32,10 +32,27 @@ export function loginPage(returnUrl: string): string {
 </div>
 <script>
  const RET = ${JSON.stringify(returnUrl)};
- const SK = 'oauth3_session', UK = 'oauth3_userkey';
+ const SK = 'oauth3_session', DK = 'oauth3_didkey';
  const $=(id)=>document.getElementById(id);
  const msg=(t,ok)=>{const m=$('msg');m.textContent=t;m.style.color=ok?'#16a34a':'#b91c1c'};
- function userKey(){ let k=localStorage.getItem(UK); if(!k){ k=[...crypto.getRandomValues(new Uint8Array(24))].map(b=>b.toString(16).padStart(2,'0')).join(''); localStorage.setItem(UK,k);} return k; }
+ const B58="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+ function b58e(b){const d=[0];for(const x of b){let c=x;for(let j=0;j<d.length;j++){c+=d[j]<<8;d[j]=c%58;c=(c/58)|0;}while(c){d.push(c%58);c=(c/58)|0;}}let s="";for(const x of b){if(x===0)s+="1";else break;}for(let k=d.length-1;k>=0;k--)s+=B58[d[k]];return s;}
+ const b64=u=>btoa(String.fromCharCode(...u));
+ function b64uDec(s){s=s.replace(/-/g,'+').replace(/_/g,'/');return Uint8Array.from(atob(s+'='.repeat((4-s.length%4)%4)),c=>c.charCodeAt(0));}
+ // did:key Ed25519 — your signing key, kept in localStorage, never sent. (TinyCloud-style.)
+ async function getKey(){
+   let jwk=JSON.parse(localStorage.getItem(DK)||'null');
+   if(!jwk){ const kp=await crypto.subtle.generateKey({name:'Ed25519'},true,['sign','verify']); jwk=await crypto.subtle.exportKey('jwk',kp.privateKey); localStorage.setItem(DK,JSON.stringify(jwk)); }
+   const priv=await crypto.subtle.importKey('jwk',jwk,{name:'Ed25519'},false,['sign']);
+   const did='did:key:z'+b58e(Uint8Array.from([0xed,0x01,...b64uDec(jwk.x)]));
+   return {priv,did};
+ }
+ async function didLogin(){
+   const {priv,did}=await getKey();
+   const {challenge}=await (await fetch('api/login/challenge')).json();
+   const sig=b64(new Uint8Array(await crypto.subtle.sign({name:'Ed25519'},priv,new TextEncoder().encode(challenge))));
+   return login({did,challenge,signature:sig});
+ }
  async function login(body){
    const r=await fetch('api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
    const d=await r.json().catch(()=>({}));
@@ -44,7 +61,7 @@ export function loginPage(returnUrl: string): string {
  }
  async function check(){ const t=localStorage.getItem(SK); if(!t) return; const d=await (await fetch('api/me',{headers:{Authorization:'Bearer '+t}})).json().catch(()=>({})); if(d.signedIn){ $('card').innerHTML='<h2>Signed in</h2><div class=sub>as '+d.subject+'. You can close this tab'+(RET?', or <a href="'+RET+'">continue</a>.':'.')+'</div>'; if(RET) setTimeout(()=>location.href=RET,800);} }
  check();
- $('go').addEventListener('click',()=>login({userKey:userKey()}));
+ $('go').addEventListener('click',()=>didLogin().catch(e=>msg('this browser lacks Ed25519 WebCrypto: '+e.message,false)));
  $('tog').addEventListener('click',(e)=>{e.preventDefault(); $('ownerbox').style.display='block'; $('secret').focus();});
  $('ownergo').addEventListener('click',()=>login({owner_secret:$('secret').value}));
 </script></body></html>`;
