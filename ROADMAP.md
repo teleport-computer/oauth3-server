@@ -7,7 +7,7 @@ repo, why, acceptance). For *how it should feel* (UX bars per path + the apps th
 exercise them), see [USER-JOURNEYS.md](USER-JOURNEYS.md).
 
 Repos:
-- **teleport-plugins** — server + plugins (otter, youtube) + the page (`docs/`)
+- **oauth3-server** — server + plugins (otter, youtube) + the page (`docs/`)
 - **oauth3-extension** — ingest client (cookie jar → instance)
 - **oauth3-sdk** — consume client (scoped token → reads)
 
@@ -77,7 +77,7 @@ Acceptance (each demonstrably true, not asserted):
 - **Federation `verify`** measurement-pin (trust the code, not the operator) — also a
   verify panel in the extension popup.
 - Otter **E2E-verified** against a real account (333 transcripts).
-- 3 repos pushed; Pages live at teleport-computer.github.io/teleport-plugins.
+- 3 repos pushed; Pages live at teleport-computer.github.io/oauth3-server.
 
 GitHub issues #1–#10 mirror the blocks below (#1 closed — Otter verified). Parallel
 sessions: **TinyCloud** multi-tenant substrate (#7), **reddit** adapter.
@@ -90,7 +90,7 @@ The walking skeleton that proves delegation. Single owner, one instance. This is
 the success condition above.
 
 ### [M1] Live-verify the Otter plugin
-**Repo:** teleport-plugins · **Blocks:** every read in the demo
+**Repo:** oauth3-server · **Blocks:** every read in the demo
 Field names in `server/plugins/otter.ts` were transcribed from
 `planning/scripts/otter_capture.py`, never confirmed against a live session
 (README "Status"). Validate `listItems`/`fetchItem` against a real Otter cookie +
@@ -99,7 +99,7 @@ HAR; fix field paths.
 notes and `/items/:id` returns a parseable transcript.
 
 ### [M1] connect / approval endpoints
-**Repo:** teleport-plugins (+ approve UI) · **Blocks:** the consent step
+**Repo:** oauth3-server (+ approve UI) · **Blocks:** the consent step
 SDK already calls these; server returns 404 today.
 - `POST /api/connect` `{plugin, subject?, app?}` → `{requestId, approveUrl}`
 - `GET  /api/connect/:requestId` → `{status: pending|denied|approved, token?}`
@@ -111,7 +111,7 @@ This is **layer 2** (per-user grant) of the two-layer auth; pairs with the
 app-store approver below, which is layer 1 (a listed app still needs this grant).
 
 ### [M1] Token revocation
-**Repo:** teleport-plugins (+ oauth3-extension button) · **Blocks:** the revoke step
+**Repo:** oauth3-server (+ oauth3-extension button) · **Blocks:** the revoke step
 `server/tokens.ts` has `mint`/`verify`, no `revoke` (README "Status").
 - `revoke(token)` + persist; `verify` rejects revoked tokens
 - `DELETE /api/tokens/:token` (owner) and a list endpoint
@@ -127,11 +127,11 @@ upload. `oauth3-sdk/examples/otter-list.ts` is the reference shape.
 from the instance — and still publishes transcripts to TinyCloud.
 
 ### [M1] Deploy the instance to the dstack node
-**Repo:** teleport-plugins · **Blocks:** "live"
+**Repo:** oauth3-server · **Blocks:** "live"
 Resolve secret delivery to isolated deno (tee-daemon `ISSUES.md #13`:
 `env_passthrough` not honored for isolated deno) — apply the ~4-line fix or deploy
 as an `image` runtime. Confirm the route and fill it into `docs/index.html`
-(currently the red `{node}/teleport-plugins/api` placeholder).
+(currently the red `{node}/oauth3/api` placeholder).
 **Acceptance:** the demo runs end-to-end against the dstack node URL, and the page's
 "live" panel shows the real route.
 
@@ -143,7 +143,7 @@ Killing the "miserable clicky popup": app-initiated connect via the SDK, the ext
 as a wallet, sign in once instead of per-use secret paste.
 
 ### [M1.5] Web sign-in + session-gated approve — DONE (2026-06-24)
-**Repo:** teleport-plugins. Sign in once at `{node}/login` → session token (localStorage,
+**Repo:** oauth3-server. Sign in once at `{node}/login` → session token (localStorage,
 sent as `Authorization` since the daemon strips cookies). Approve page + owner-gated
 endpoints accept the session, so you approve apps with one click, no re-paste.
 **Acceptance:** ✓ verified LIVE in a real browser — connect → sign in once → Approve → token → read 51 reddit items.
@@ -161,7 +161,7 @@ app calls `oauth3.connect()`, one Connect click, wallet copies the jar to the TE
 a token and reads 51 real Reddit items (`tok-reddit-1cbcc6c259e6…`). Cookies shredded after.
 
 ### [M1.5] TinyCloud / did:key sign-in (kill the last secret paste) — DONE (2026-06-24, live-verified)
-**Repo:** teleport-plugins. Added `did:key` (Ed25519) signed sign-in — TinyCloud's
+**Repo:** oauth3-server. Added `did:key` (Ed25519) signed sign-in — TinyCloud's
 signed-invocation identity reduced to its core: `GET /api/login/challenge` → the browser
 signs the nonce with a key it keeps in localStorage (never sent) → `POST /api/login
 {did,challenge,signature}` → `verifyDidSignIn` (WebCrypto Ed25519, single-use challenge) →
@@ -184,7 +184,7 @@ The page is written present-tense for these; today's server does **not** do them
 Either build them or scope the copy (`docs/index.html`).
 
 ### [M2] Agentic app-store approver (listing — auth layer 1)
-**Repo:** teleport-plugins (+ a listing UI) · the curation gate.
+**Repo:** oauth3-server (+ a listing UI) · the curation gate.
 An agent that vets apps and maintains a **default listing** — possibly the main or
 only way to consume the plugin/sdk. Gatekeeps *which apps may exist*; does **not**
 replace the per-user grant ([M1] connect). It's also where convergence is nudged
@@ -194,7 +194,7 @@ replace the per-user grant ([M1] connect). It's also where convergence is nudged
 app still requires a per-user `connect()` grant before it can read.
 
 ### [M2] Multi-tenant (per-user keys, not one owner secret) — DONE (2026-06-24, live-verified)
-**Repo:** teleport-plugins + oauth3-extension.
+**Repo:** oauth3-server + oauth3-extension.
 Identity is a **subject**; where it comes from is pluggable and passkey is NOT imposed:
 - **default** — a random `userKey` in the browser's/extension's localStorage →
   `subject = "u-"+sha256(userKey)`. No account, no passkey, no paste.
@@ -218,7 +218,7 @@ used it to scrub the test tenant. Remaining identity upgrade: passkey/TinyCloud 
 (the block below) — optional, never imposed.
 
 ### [M2] Federation
-**Repo:** teleport-plugins / oauth3-sdk · "any federated instance" isn't built.
+**Repo:** oauth3-server / oauth3-sdk · "any federated instance" isn't built.
 Page already says *soon* — keep it honest. Likely: instance directory + the SDK
 picking which instance serves a plugin.
 
@@ -232,9 +232,9 @@ attestation before syncing a jar / before trusting reads) + an audit log. Backs 
 ## Milestone 3 — ship the page
 
 ### [M3] Publish repos + GitHub Pages
-**Repos:** all three · create `teleport-computer/{teleport-plugins,oauth3-extension,
-oauth3-sdk}`, push, enable Pages on teleport-plugins `docs/` →
-`https://teleport-computer.github.io/teleport-plugins/`. Confirm the live route and
+**Repos:** all three · create `teleport-computer/{oauth3-server,oauth3-extension,
+oauth3-sdk}`, push, enable Pages on oauth3-server `docs/` →
+`https://teleport-computer.github.io/oauth3-server/`. Confirm the live route and
 the cookie/no-extension copy. (login-with-anything moved account-link →
 teleport-computer; links already correct.)
 

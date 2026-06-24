@@ -7,7 +7,7 @@ API. The extension syncs your whole cookie jar for a site to a server; a **plugi
 turns that jar into `list`/`fetch` reads; a **scoped token** lets an app or agent
 read your data without ever holding the raw jar.
 
-Forked structurally from [openfeedling](../openfeedling) — its
+Forked structurally from [openfeedling](../../openfeedling) — its
 `shortCheck(cookies)` (cookie jar → unofficial API) is the seam that became the
 `Plugin` interface. It is **not** the browser+vision path (login-with-anything);
 that's the fallback for sites with *no* usable API.
