@@ -7,11 +7,11 @@ Companion to [ROADMAP.md](ROADMAP.md) (what to build) — this is *how it should
 
 Smoothness: ● smooth · ◑ ok, has friction · ○ rough/manual · ◌ not built yet
 
-> Reconciled 2026-06-24: the delegation handshake (connect + revoke) is built and
-> verified against real Reddit (J3 ●). **Instance now LIVE** at the dstack node
-> (`915c8197…/oauth3/`, `/health` ready, otter+reddit jars synced — #5 closed). J6 ●.
-> Remaining for the north-star: J4's full TinyCloud publish (#4). Some implementing
-> code is in the working tree, push pending.
+> **M1 COMPLETE (2026-06-24).** Single-tenant north-star verified end-to-end on the
+> live dstack node (`915c8197…/oauth3/`): no-install cookie ingest, otter/reddit
+> reads, connect → approve → scoped token, revoke → 401, otter-importer running
+> cookie-free. J1–J4 + J6 all green; #1–#5 closed. Next: M2 — browser worker (J5)
+> and the app-store approver (J7).
 
 ---
 
@@ -19,7 +19,7 @@ Smoothness: ● smooth · ◑ ok, has friction · ○ rough/manual · ◌ not bu
 
 | app | path | does | smoothness |
 |---|---|---|---|
-| **otter-importer** | cookie | Otter transcripts → TinyCloud | ◑ (SDK source `OtterViaOauth3` wired into CLI — cookie-free; full pull→TinyCloud publish pending E2E verify — #4) |
+| **otter-importer** | cookie | Otter transcripts → TinyCloud | ● (runs cookie-free via `OtterViaOauth3` → token; verified live scan/pull — #4 closed) |
 | **reddit** | cookie | list/fetch a Reddit account | ● (verified — 51 items, connect+revoke E2E) |
 | **nytimes** | cookie | added via the adapter template | ◑ (adapter added; consuming flow untested) |
 | **youtube** | cookie | watch history | ◑ (adapter built; no consuming app yet) |
@@ -66,14 +66,14 @@ Smoothness: ● smooth · ◑ ok, has friction · ○ rough/manual · ◌ not bu
 **Good enough when:** the user understands exactly what they granted and revokes in one click.
 **Status:** connect + approve/deny + revoke **built & verified** against real Reddit (#2, #3 closed). Listing layer (#6) still ahead. **Exercised by:** reddit, otter-importer.
 
-### J4 · App delivers value — Otter → TinyCloud ◑
+### J4 · App delivers value — Otter → TinyCloud ●
 **Actor:** heavy transcriber. **Goal:** transcripts in TinyCloud, app holding only a token.
 1. grant via J3 (or owner-mint).
 2. otter-importer `list` + `fetch` via the SDK · **bar:** no Otter cookie of its own.  ✓ scans cookie-free
 3. publish to TinyCloud · **bar:** the actual payoff lands; revoking stops future imports.
 
 **Good enough when:** transcripts land in TinyCloud and the app provably never held the cookie.
-**Status:** SDK-backed source (`OtterViaOauth3`) wired into the CLI — runs cookie-free, reads via connect/token; the existing `upload`→TinyCloud path consumes it. Pending: one E2E run of node→pull→publish (#4). **Exercised by:** otter-importer.
+**Status:** verified live — otter-importer runs cookie-free (`OtterViaOauth3` → connect → token), scan/pull with no Otter cookie; the existing `upload`→TinyCloud path consumes it (gated on `tc` auth). #4 closed. **Exercised by:** otter-importer.
 
 ### J5 · Browser capture — JS-gated site ◌
 **Actor:** user wanting a screenshot/DOM of a site with no usable API. **Goal:** capture a rendered page with my session.
@@ -109,6 +109,6 @@ Smoothness: ● smooth · ◑ ok, has friction · ○ rough/manual · ◌ not bu
 | **youtube** | ✓ | ✓ | ✓ | (read demo) | — |
 | **screenshot/DOM** | uses synced jar | uses synced jar | ✓ | — | ✓ |
 
-First end-to-end target = **otter-importer across J1→J2→J3→J4** (the north-star). J3 is
-green and the **instance is live** (#5 done); the only thing left for the north-star is
-J4's full TinyCloud publish (#4). Browser (J5) and the approver (J7) follow.
+First end-to-end target = **otter-importer across J1→J2→J3→J4** (the north-star) — **done**,
+verified live (#1–#5 closed). Next milestone: the browser worker (J5) and the app-store
+approver (J7).
