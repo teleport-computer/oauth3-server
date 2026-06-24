@@ -17,7 +17,7 @@ Smoothness: ● smooth · ◑ ok, has friction · ○ rough/manual · ◌ not bu
 
 | app | path | does | smoothness |
 |---|---|---|---|
-| **otter-importer** | cookie | Otter transcripts → TinyCloud | ◑ (reads cookie-free via token; full TinyCloud loop on SDK pending — #4) |
+| **otter-importer** | cookie | Otter transcripts → TinyCloud | ◑ (SDK source `OtterViaOauth3` wired into CLI — cookie-free; full pull→TinyCloud publish pending E2E verify — #4) |
 | **reddit** | cookie | list/fetch a Reddit account | ● (verified — 51 items, connect+revoke E2E) |
 | **nytimes** | cookie | added via the adapter template | ◑ (adapter added; consuming flow untested) |
 | **youtube** | cookie | watch history | ◑ (adapter built; no consuming app yet) |
@@ -71,7 +71,7 @@ Smoothness: ● smooth · ◑ ok, has friction · ○ rough/manual · ◌ not bu
 3. publish to TinyCloud · **bar:** the actual payoff lands; revoking stops future imports.
 
 **Good enough when:** transcripts land in TinyCloud and the app provably never held the cookie.
-**Status:** token-only reads verified; full TinyCloud loop on the SDK path pending (#4). **Exercised by:** otter-importer.
+**Status:** SDK-backed source (`OtterViaOauth3`) wired into the CLI — runs cookie-free, reads via connect/token; the existing `upload`→TinyCloud path consumes it. Pending: one E2E run of node→pull→publish (#4). **Exercised by:** otter-importer.
 
 ### J5 · Browser capture — JS-gated site ◌
 **Actor:** user wanting a screenshot/DOM of a site with no usable API. **Goal:** capture a rendered page with my session.
