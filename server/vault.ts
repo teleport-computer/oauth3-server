@@ -65,6 +65,14 @@ export function jarStatus(subject: string, plugin: string): { present: boolean; 
   return { present: !!e, updatedAt: e?.updatedAt ?? 0, count: e ? Object.keys(e.jar).length : 0 };
 }
 
+export async function deleteJar(subject: string, plugin: string): Promise<boolean> {
+  const k = keyOf(subject, plugin);
+  if (!(k in store)) return false;
+  delete store[k];
+  await persist();
+  return true;
+}
+
 // Every (subject, plugin, jar) the scheduler should poll.
 export function allJars(): { subject: string; plugin: string; jar: Jar }[] {
   return Object.entries(store).map(([k, e]) => {

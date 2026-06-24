@@ -13,7 +13,7 @@
 //   GET    /api/:plugin/items[/:id]           scoped token OR owner — read
 
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
-import { getJar, initVault, jarStatus, setJar } from "./vault.ts";
+import { deleteJar, getJar, initVault, jarStatus, setJar } from "./vault.ts";
 import { initTokens, listTokens, mint, revoke, verify } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit } from "./audit.ts";
@@ -131,6 +131,17 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     await setJar(subj, plugin.id, body.cookies);
     await audit("cookies.sync", { subject: subj, plugin: plugin.id, count: Object.keys(body.cookies).length });
     return json({ ok: true, plugin: plugin.id, count: Object.keys(body.cookies).length });
+  }
+
+  // Wipe a jar — your own by default; owner may target any subject via ?subject=.
+  const delc = path.match(/^\/api\/cookies\/([a-z0-9-]+)$/);
+  if (req.method === "DELETE" && delc) {
+    const subj = subjectOf();
+    if (!subj) return json({ error: "unauthorized" }, 401);
+    const target = (isOwner(req) && url.searchParams.get("subject")) || subj;
+    const ok = await deleteJar(target, delc[1]);
+    await audit("cookies.delete", { subject: target, plugin: delc[1], found: ok });
+    return json({ ok, deleted: ok });
   }
 
   // --- tokens ---

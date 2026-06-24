@@ -184,7 +184,7 @@ replace the per-user grant ([M1] connect). It's also where convergence is nudged
 **Acceptance:** an app must be in the approved listing to be consumable; a listed
 app still requires a per-user `connect()` grant before it can read.
 
-### [M2] Multi-tenant (per-user keys, not one owner secret) — BUILT (2026-06-24), live-verify pending
+### [M2] Multi-tenant (per-user keys, not one owner secret) — DONE (2026-06-24, live-verified)
 **Repo:** teleport-plugins + oauth3-extension.
 Identity is a **subject**; where it comes from is pluggable and passkey is NOT imposed:
 - **default** — a random `userKey` in the browser's/extension's localStorage →
@@ -199,8 +199,14 @@ polls per `(subject, plugin)`. Login page defaults to "Continue in this browser"
 extension wallet self-issues a userKey session (owner secret optional override).
 **Locally verified:** two userKeys → isolated jars (A's reddit jar invisible to B/anon);
 A's token reads A's jar, B's token → "no jar synced"; owner path + migration both pass.
-**Pending:** redeploy to the live node + re-run the container provider E2E with the
-multi-tenant wallet. Then this is DONE.
+**Live-verified (2026-06-24)** on the dstack node (tree_hash `771ce07e…`): a fresh
+container wallet with **no secret** self-issued `subject=u-85e2…` (its own userKey),
+copied the reddit jar under that subject, got `tok-reddit-ba8a9cef…` bound to it, and
+read **51 real reddit items** — `secret set: false`, `has userKey: true`. Owner's
+migrated jars (otter 49 / reddit 22 / nytimes 31) intact. `DELETE /api/cookies/:plugin`
+(own jar; owner may target `?subject=`) added so a jar can be wiped, not just its tokens;
+used it to scrub the test tenant. Remaining identity upgrade: passkey/TinyCloud sign-in
+(the block below) — optional, never imposed.
 
 ### [M2] Federation
 **Repo:** teleport-plugins / oauth3-sdk · "any federated instance" isn't built.
