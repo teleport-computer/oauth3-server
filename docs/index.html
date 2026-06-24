@@ -252,6 +252,18 @@ curl -s <span class="a">$NODE</span>/api/otter/items/<span class="a">&lt;otid&gt
       </table>
     </section>
 
+    <section class="block">
+      <h2>ways to use it</h2>
+      <p>A handful of distinct paths, each held to its own UX bar &mdash; tracked in <a href="https://github.com/teleport-computer/teleport-plugins/blob/main/USER-JOURNEYS.md">USER-JOURNEYS.md</a>.</p>
+      <ul>
+        <li><strong>Paste a cookie, no install</strong> &mdash; one CLI flow: verify → sync → token → read.</li>
+        <li><strong>Install the extension</strong> &mdash; sync once, then forget about cookies; it auto-refreshes.</li>
+        <li><strong>Grant an app</strong> &mdash; approve a listed app onto your jar, read with a scoped token, revoke anytime.</li>
+        <li><strong>Capture a page</strong> &mdash; for JS-gated sites, render with your jar and grab a screenshot / DOM.</li>
+        <li><strong>Add a site</strong> &mdash; copy the adapter template, fill the endpoints, register.</li>
+      </ul>
+    </section>
+
     <section class="question">
       <span class="lbl">question</span>
       <p>If every credential lived in a room only you could open, what would &ldquo;log in with X&rdquo; become?</p>
