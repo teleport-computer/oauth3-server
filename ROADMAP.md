@@ -184,12 +184,23 @@ replace the per-user grant ([M1] connect). It's also where convergence is nudged
 **Acceptance:** an app must be in the approved listing to be consumable; a listed
 app still requires a per-user `connect()` grant before it can read.
 
-### [M2] Multi-tenant (per-user keys, not one owner secret)
-**Repo:** teleport-plugins · today: single `OWNER_SECRET`, vault keyed by *plugin*.
-The page says "multi-tenant… the user's keys decide who gets what" — that's
-TinyCloud's signed-invocation substrate, not wired in. Build per-user tenancy
-(jars + tokens scoped to a user identity / signed invocations) **or** soften the
-page to "single-tenant today, multi-tenant via TinyCloud next."
+### [M2] Multi-tenant (per-user keys, not one owner secret) — BUILT (2026-06-24), live-verify pending
+**Repo:** teleport-plugins + oauth3-extension.
+Identity is a **subject**; where it comes from is pluggable and passkey is NOT imposed:
+- **default** — a random `userKey` in the browser's/extension's localStorage →
+  `subject = "u-"+sha256(userKey)`. No account, no passkey, no paste.
+- **owner secret** → `subject = "owner"` (admin/bootstrap; also the legacy path).
+- passkey / TinyCloud later → same `createSession(subject)` layer.
+
+Done: vault keyed `(subject, plugin)` with legacy `<plugin>`→`owner:<plugin>` migration;
+tokens bound to the **approver's** subject; reads resolve the token's own subject's jar;
+`/api/cookies`, `/api/tokens`, connect-approve all scope to the acting subject; scheduler
+polls per `(subject, plugin)`. Login page defaults to "Continue in this browser" (userKey);
+extension wallet self-issues a userKey session (owner secret optional override).
+**Locally verified:** two userKeys → isolated jars (A's reddit jar invisible to B/anon);
+A's token reads A's jar, B's token → "no jar synced"; owner path + migration both pass.
+**Pending:** redeploy to the live node + re-run the container provider E2E with the
+multi-tenant wallet. Then this is DONE.
 
 ### [M2] Federation
 **Repo:** teleport-plugins / oauth3-sdk · "any federated instance" isn't built.

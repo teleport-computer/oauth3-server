@@ -7,8 +7,8 @@
 // Errors propagate to the tick handler, which logs and lets the next interval retry.
 // The loop itself stays alive so one bad fetch (or an expired jar) doesn't stop sync.
 
-import { allPlugins } from "./plugins/registry.ts";
-import { getJar } from "./vault.ts";
+import { getPlugin } from "./plugins/registry.ts";
+import { allJars } from "./vault.ts";
 
 let started = false;
 
@@ -23,10 +23,10 @@ export function startScheduler(env: Record<string, string>, dataDir: string): vo
 }
 
 async function syncAll(dataDir: string): Promise<void> {
-  for (const p of allPlugins()) {
-    const jar = getJar(p.id);
-    if (!jar || !p.loggedIn(jar)) continue;
-    const dir = `${dataDir}/transcripts/${p.id}`;
+  for (const { subject, plugin: pid, jar } of allJars()) {
+    const p = getPlugin(pid);
+    if (!p || !p.loggedIn(jar)) continue;
+    const dir = `${dataDir}/transcripts/${subject}/${pid}`;
     await Deno.mkdir(dir, { recursive: true });
     const items = await p.listItems(jar);
     let added = 0;
@@ -37,7 +37,7 @@ async function syncAll(dataDir: string): Promise<void> {
       await Deno.writeTextFile(f, JSON.stringify({ item: it, data, syncedAt: Date.now() }));
       added++;
     }
-    if (added) console.log(`[sched] ${p.id}: +${added} new (${items.length} total)`);
+    if (added) console.log(`[sched] ${subject}/${pid}: +${added} new (${items.length} total)`);
   }
 }
 

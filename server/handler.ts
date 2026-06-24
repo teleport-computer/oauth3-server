@@ -54,6 +54,11 @@ function html(body: string): Response {
 }
 const isOwner = (req: Request) => !!ownerSecret && req.headers.get("Authorization") === `Bearer ${ownerSecret}`;
 
+async function sha256hex(s: string): Promise<string> {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+}
+
 export default async function handler(req: Request, ctx: HandlerCtx): Promise<Response> {
   await init(ctx.env || {}, ctx.dataDir || "");
 
@@ -75,6 +80,9 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   // it strips cookies). The login/approve pages keep it in localStorage.
   const authBearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
   const session = verifySession(authBearer);
+  // The acting identity: a web session's subject, or "owner" when the owner secret is
+  // presented directly (CLI/extension). null = unauthenticated. Jars + tokens scope to it.
+  const subjectOf = (): string | null => session?.subject ?? (isOwner(req) ? "owner" : null);
 
   // --- web sign-in (so you approve apps without re-pasting the owner secret) ---
   if (req.method === "GET" && path === "/login") {
@@ -82,9 +90,14 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   }
   if (req.method === "POST" && path === "/api/login") {
     const body = await req.json().catch(() => null) as any;
-    if (!ownerSecret || body?.owner_secret !== ownerSecret) return json({ error: "wrong secret" }, 401);
-    const token = await createSession("owner");
-    return json({ ok: true, subject: "owner", session: token });
+    // Default identity: a localStorage-held userKey (no passkey, no server-side account
+    // — the key in your browser is who you are). Owner secret is the admin/bootstrap path.
+    let subject = "";
+    if (typeof body?.userKey === "string" && body.userKey.length >= 16) subject = "u-" + await sha256hex(body.userKey);
+    else if (ownerSecret && body?.owner_secret === ownerSecret) subject = "owner";
+    else return json({ error: "provide a userKey (≥16 chars) or the owner secret" }, 401);
+    const token = await createSession(subject);
+    return json({ ok: true, subject, session: token });
   }
   if (req.method === "POST" && path === "/api/logout") {
     await destroySession(authBearer);
@@ -99,30 +112,34 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   }
 
   if (req.method === "GET" && path === "/api/plugins") {
+    const subj = subjectOf(); // jar status is per-identity; anonymous sees none present
     return json({
       plugins: allPlugins().map((p) => ({
-        id: p.id, label: p.label, cookieDomains: p.cookieDomains, jar: jarStatus(p.id),
+        id: p.id, label: p.label, cookieDomains: p.cookieDomains,
+        jar: subj ? jarStatus(subj, p.id) : { present: false, updatedAt: 0, count: 0 },
       })),
     });
   }
 
   if (req.method === "POST" && path === "/api/cookies") {
-    if (!isOwner(req) && !session) return json({ error: "unauthorized" }, 401);
+    const subj = subjectOf();
+    if (!subj) return json({ error: "unauthorized" }, 401);
     const body = await req.json().catch(() => null) as any;
     const plugin = getPlugin(body?.plugin);
     if (!plugin) return json({ error: "unknown plugin" }, 404);
     if (!body?.cookies || typeof body.cookies !== "object") return json({ error: "missing cookies" }, 400);
-    await setJar(plugin.id, body.cookies);
-    await audit("cookies.sync", { plugin: plugin.id, count: Object.keys(body.cookies).length });
+    await setJar(subj, plugin.id, body.cookies);
+    await audit("cookies.sync", { subject: subj, plugin: plugin.id, count: Object.keys(body.cookies).length });
     return json({ ok: true, plugin: plugin.id, count: Object.keys(body.cookies).length });
   }
 
   // --- tokens ---
   if (req.method === "POST" && path === "/api/tokens") {
-    if (!isOwner(req) && !session) return json({ error: "unauthorized" }, 401);
+    const subj = subjectOf();
+    if (!subj) return json({ error: "unauthorized" }, 401);
     const body = await req.json().catch(() => null) as any;
     if (!getPlugin(body?.plugin)) return json({ error: "unknown plugin" }, 404);
-    const t = await mint(body.plugin, body.subject, body.app);
+    const t = await mint(body.plugin, subj, body.app); // bound to the minter's jar
     await audit("token.mint", { plugin: t.plugin, subject: t.subject, app: t.app });
     return json({ token: t.token, plugin: t.plugin, subject: t.subject });
   }
@@ -160,11 +177,11 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     }
     if (req.method === "POST" && action) {
       const body = await req.json().catch(() => null) as any;
-      const authed = isOwner(req) || !!session || (!!ownerSecret && body?.owner_secret === ownerSecret);
-      if (!authed) return json({ error: "sign in to approve" }, 401);
-      const r = action === "approve" ? await approveConnect(id) : await denyConnect(id);
+      const approver = subjectOf() ?? (!!ownerSecret && body?.owner_secret === ownerSecret ? "owner" : null);
+      if (!approver) return json({ error: "sign in to approve" }, 401);
+      const r = action === "approve" ? await approveConnect(id, approver) : await denyConnect(id);
       if (!r) return json({ error: "unknown or already-decided request" }, 404);
-      await audit(`connect.${action}`, { plugin: r.plugin, app: r.app, requestId: id });
+      await audit(`connect.${action}`, { subject: approver, plugin: r.plugin, app: r.app, requestId: id });
       return json({ ok: true, status: r.status });
     }
   }
@@ -181,7 +198,9 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
-    const jar = getJar(plugin.id);
+    // A scoped token reads its own subject's jar; the owner secret reads owner's.
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     try {

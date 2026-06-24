@@ -38,10 +38,12 @@ export async function createConnect(plugin: string, subject?: string, app?: stri
 
 export function getConnect(id: string): ConnectReq | undefined { return reqs[id]; }
 
-export async function approveConnect(id: string): Promise<ConnectReq | null> {
+// The token is bound to the APPROVER's identity (whose jar it will read), not the
+// app-supplied attribution. r.subject stays as the app's display hint.
+export async function approveConnect(id: string, approver: string): Promise<ConnectReq | null> {
   const r = reqs[id];
   if (!r || r.status !== "pending") return null;
-  const t = await mint(r.plugin, r.subject, r.app);
+  const t = await mint(r.plugin, approver, r.app);
   r.status = "approved";
   r.token = t.token;
   await persist();

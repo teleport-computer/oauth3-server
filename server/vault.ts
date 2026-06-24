@@ -1,12 +1,14 @@
-// Per-plugin cookie jars, sealed at rest with AES-GCM. The cookie jar is the raw
-// credential, so it is never written in plaintext. SEAL_KEY (32-byte hex) is the
-// per-app key the daemon derives from TEE material (dstack GetKey → HKDF) and injects
-// via the isolated-container argv — never committed to source. Dev sets it in .env.
-// Generalizes openfeedling's single-jar cookies.ts to a map keyed by plugin id.
+// Per-tenant, per-plugin cookie jars, sealed at rest with AES-GCM. The cookie jar
+// is the raw credential, so it is never written in plaintext. SEAL_KEY (32-byte hex)
+// is the per-app key the daemon derives from TEE material (dstack GetKey → HKDF) and
+// injects via the isolated-container argv — never committed to source. Dev sets it
+// in .env. Keyed by `${subject}:${plugin}` so each signed-in identity has its own jar.
 
 import { Jar } from "./plugins/types.ts";
 
 interface Entry { jar: Jar; updatedAt: number; }
+
+const keyOf = (subject: string, plugin: string) => `${subject}:${plugin}`;
 
 let file = "";
 let key: CryptoKey | null = null;
@@ -26,7 +28,13 @@ export async function initVault(dir: string, keyHex: string): Promise<void> {
     const raw = await Deno.readFile(file);
     const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: raw.subarray(0, 12) as BufferSource }, key, raw.subarray(12) as BufferSource);
     store = JSON.parse(new TextDecoder().decode(pt));
-    console.log(`[vault] loaded ${Object.keys(store).length} jars (sealed)`);
+    // Migrate legacy single-tenant keys ("<plugin>") to "owner:<plugin>".
+    let migrated = 0;
+    for (const k of Object.keys(store)) {
+      if (!k.includes(":")) { store[keyOf("owner", k)] = store[k]; delete store[k]; migrated++; }
+    }
+    if (migrated) await persist();
+    console.log(`[vault] loaded ${Object.keys(store).length} jars (sealed)${migrated ? `, migrated ${migrated} → owner:` : ""}`);
   } catch (e) {
     if (!(e instanceof Deno.errors.NotFound)) throw e;
   }
@@ -43,16 +51,24 @@ async function persist(): Promise<void> {
   await Deno.writeFile(file, out);
 }
 
-export async function setJar(plugin: string, jar: Jar): Promise<void> {
-  store[plugin] = { jar, updatedAt: Date.now() };
+export async function setJar(subject: string, plugin: string, jar: Jar): Promise<void> {
+  store[keyOf(subject, plugin)] = { jar, updatedAt: Date.now() };
   await persist();
 }
 
-export function getJar(plugin: string): Jar | null {
-  return store[plugin]?.jar ?? null;
+export function getJar(subject: string, plugin: string): Jar | null {
+  return store[keyOf(subject, plugin)]?.jar ?? null;
 }
 
-export function jarStatus(plugin: string): { present: boolean; updatedAt: number; count: number } {
-  const e = store[plugin];
+export function jarStatus(subject: string, plugin: string): { present: boolean; updatedAt: number; count: number } {
+  const e = store[keyOf(subject, plugin)];
   return { present: !!e, updatedAt: e?.updatedAt ?? 0, count: e ? Object.keys(e.jar).length : 0 };
+}
+
+// Every (subject, plugin, jar) the scheduler should poll.
+export function allJars(): { subject: string; plugin: string; jar: Jar }[] {
+  return Object.entries(store).map(([k, e]) => {
+    const i = k.indexOf(":");
+    return { subject: k.slice(0, i), plugin: k.slice(i + 1), jar: e.jar };
+  });
 }
