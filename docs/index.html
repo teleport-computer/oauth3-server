@@ -97,20 +97,20 @@
     <section class="block">
       <h2>try it — live</h2>
       <div class="cards">
-        <a class="card" href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/otter/">
-          <div class="lbl">example app</div>
-          <div class="name">Otter Copilot</div>
-          <div class="desc">Reads your Otter.ai transcripts through oauth3 — never holding your cookie — and turns them into recaps, corrections, and shareable notes.</div>
-          <div class="go">open the app →</div>
-        </a>
         <a class="card" href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/oauth3/login">
-          <div class="lbl">your account</div>
+          <div class="lbl">your account · live</div>
           <div class="name">Sign in</div>
-          <div class="desc">Sign in to an oauth3 instance with a key only you hold (did:key), then approve which apps may read which of your accounts.</div>
+          <div class="desc">A live oauth3 instance. Sign in with a key only you hold (did:key), then approve which apps may read which of your accounts — and revoke any of them.</div>
           <div class="go">sign in →</div>
         </a>
+        <a class="card" href="https://github.com/amiller/otter-importer">
+          <div class="lbl">reference app</div>
+          <div class="name">otter-importer</div>
+          <div class="desc">The example that actually uses oauth3: it pulls your Otter transcripts holding only a scoped token — never your cookie — through the SDK&rsquo;s <code>connect()</code> flow.</div>
+          <div class="go">see the code →</div>
+        </a>
       </div>
-      <p class="podnote">Both run on <strong>Andrew&rsquo;s personal TEE pod</strong> — a <a href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/">dstack tee-daemon</a> at <code>915c8197…dstack-pha-prod7.phala.network</code>. That pod <em>is</em> the oauth3 instance: the sealed room your cookies live in, and the host for the example apps that read through it.</p>
+      <p class="podnote">The instance runs on <strong>Andrew&rsquo;s personal TEE pod</strong> — a <a href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/">dstack tee-daemon</a> at <code>915c8197…dstack-pha-prod7.phala.network</code>. That pod <em>is</em> the oauth3 instance: the sealed room your cookies live in; apps read through it with a scoped token.</p>
     </section>
 
     <section class="block">
@@ -145,23 +145,6 @@ oauth3 token otter            <span class="c"># → scoped token</span>
 oauth3 read  otter            <span class="c"># real data, no cookie</span></pre>
         </div>
       </div>
-    </section>
-
-    <section class="block">
-      <h2>example apps</h2>
-      <table>
-        <tr><th>app</th><th>what it does</th><th></th></tr>
-        <tr>
-          <td><strong>Otter Copilot</strong></td>
-          <td>Recaps &amp; shareable notes from your Otter transcripts, read via oauth3.</td>
-          <td><a href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/otter/">live ↗</a></td>
-        </tr>
-        <tr>
-          <td><strong>otter-importer</strong></td>
-          <td>CLI that pulls your Otter transcripts into TinyCloud holding only a token.</td>
-          <td><a href="https://github.com/amiller/otter-importer">repo ↗</a></td>
-        </tr>
-      </table>
     </section>
 
     <section class="block">
