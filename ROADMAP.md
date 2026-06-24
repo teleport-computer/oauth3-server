@@ -75,14 +75,17 @@ Acceptance (each demonstrably true, not asserted):
 >   stale — all endpoints serve); otter-importer token-only **read** path real and now
 >   doc'd + e2e-tested (proves no cookie touched); reddit adapter functionally complete
 >   (saved-post list + item fetch over the legacy `.json` cookie API).
-> - **NOT yet a reproducible live demo (the real remaining M1 gate):** "working app demo"
->   needs a live run with a **real jar** for reddit (and an otter re-run) — neither is
->   reproducible from code alone, and the page's "live-verified"/"333 transcripts" claims
->   are assertions, not artifacts. **Open risk:** the cookie-only reddit adapter fetches
->   `www.reddit.com` *directly from the pod's datacenter IP* — the same IP Reddit's
->   network-security wall 403'd in the browser test; the legacy `.json` surface may or may
->   not be behind that WAF. If it is, reddit needs a **pod-side egress proxy** (the
->   ProtonVPN→SOCKS5 sidecar already used for the browser path).
+> - **Reddit demo LIVE-PROVEN end-to-end (2026-06-24).** Real jar → token-only read of
+>   **51 saved posts**, both locally and **on the live pod** (subject `u-af6ad6d7…`,
+>   `tok-reddit-…`, test jar shredded after). The cookie never left the instance.
+>   **Egress risk RESOLVED:** the cookie-only adapter fetches `www.reddit.com` directly
+>   from the pod's datacenter IP and Reddit served it — the legacy `.json` surface is *not*
+>   behind the JS-challenge WAF that 403'd the browser web app, so **no pod-side egress
+>   proxy is needed** for the `.json` adapter path. (The ProtonVPN→SOCKS5 sidecar is still
+>   the answer if a *browser*-path plugin is ever pointed at reddit.)
+> - **Still assertion-not-artifact:** otter's "333 transcripts" live claim is unverified
+>   this session (token-only path is e2e-tested against a fake; a real-jar otter re-run is
+>   optional follow-up).
 > - **Deferred to M2 (not M1 blockers):** the deployed project is `mode: dev`, not
 >   `attested`, so the trust/measurement-pin story isn't exercisable on this instance yet;
 >   TinyCloud **upload** leg still needs `tc` auth (token-only covers the read leg only).
