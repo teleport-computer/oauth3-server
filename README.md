@@ -57,6 +57,35 @@ curl -s localhost:3000/api/otter/items -H "Authorization: Bearer tok-otter-..."
 curl -s localhost:3000/api/otter/items/<otid> -H "Authorization: Bearer tok-otter-..."
 ```
 
+## No-plugin, no-browser quickstart (CLI)
+
+The extension just automates copying a cookie — you don't need it, and you never need a
+browser for a frozen-API plugin. `cli.ts` is a general client to any compatible instance:
+paste a cookie, mint a scoped token, read.
+
+```bash
+I="--instance http://localhost:3000"
+deno run -A cli.ts plugins $I                                          # list plugins
+# paste a cookie copied from DevTools (Application → Cookies) — no browser automation:
+deno run -A cli.ts sync otter --cookie 'sessionid=...,csrftoken=...' --owner $OWNER_SECRET $I
+deno run -A cli.ts token otter --subject andrew --owner $OWNER_SECRET $I   # → tok-otter-...
+deno run -A cli.ts read  otter --token tok-otter-... $I                    # real data, no raw cookie
+```
+
+**Federation pin** — before trusting an instance, check its code measurement against an
+allowlist (trust the code, not the operator):
+
+```bash
+deno run -A cli.ts verify --daemon https://a-daemon.example --project otter \
+  --allow <tree_hash_1>,<tree_hash_2>      # ✓ TRUSTED / ✗ UNTRUSTED (exit 2)
+```
+
+**Other no-plugin / no-browser onboarding:**
+- **API key** (e.g. GitHub/Anthropic): store it as a secret in `oauth3-enclave`
+  (`POST /secrets`); a scoped-fetch capability injects it. No cookie at all.
+- **Add a site** (e.g. NYTimes): copy `server/plugins/_template.ts`, fill the endpoints from a
+  live HAR, register in `registry.ts`. No browser unless the site gates with JS/captcha.
+
 ## Deploy (tee-daemon)
 
 Runs as a tee-daemon project (no dedicated CVM). `server/project.json` declares it:
@@ -80,11 +109,12 @@ volume isolation for at-rest protection. Dev supplies both via `.env`.
 
 ## Status
 
-Built: plugin interface, Otter + YouTube plugins, sealed cookie vault, scoped tokens,
-extension jar-sync + auto-sync (cookie-change + 30m alarm), background poll loop,
-tee-daemon `project.json`. Not yet: live-verified Otter field names, secret delivery to
-isolated deno (ISSUES.md #13), external data volume, attestation-pinning in the extension,
-token revocation, audit log.
+Built: plugin interface (+ `_template.ts`), Otter + YouTube plugins, sealed cookie vault,
+scoped tokens, extension jar-sync + auto-sync (cookie-change + 30m alarm), background poll
+loop, tee-daemon `project.json`, **general CLI** (`cli.ts`: plugins/sync/token/read +
+federation `verify` pin), **E2E-verified in a container with real Otter** (333 transcripts).
+Not yet: live-verified Otter field names, secret delivery to isolated deno (ISSUES.md #13),
+external data volume, attestation-pinning in the extension, token revocation, audit log.
 
 See [ROADMAP.md](ROADMAP.md) for the success condition and the milestone breakdown
 (issue-shaped — mirror into GitHub issues once the repos are pushed).

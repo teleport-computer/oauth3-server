@@ -54,13 +54,17 @@ designed-in abstraction.
 
 Acceptance (each demonstrably true, not asserted):
 
-- [ ] instance live at a confirmed route on the dstack node (attested)
-- [ ] paste Otter cookie, no extension → `200`, jar sealed
-- [x] `otter.list()` returns real notes; `fetch()` returns a real transcript  ✓ (333 transcripts, container run)
-- [ ] app `connect()` → user sees an approval → approves → app gets a token
-- [ ] app reads via token only; imports to TinyCloud
-- [ ] revoke → app's next read `401`s
-- [ ] page links the live demo + repos; a stranger can reproduce
+- [x] instance live at a confirmed route on the dstack node  ✓ LIVE at `{node}/oauth3` (deno isolation:container, runc, sealed vault via env_passthrough/#13)
+- [x] paste Otter cookie, no extension → `200`, jar sealed  ✓ (CLI `sync` + sealed vault)
+- [x] `otter.list()` returns real notes; `fetch()` returns a real transcript  ✓ (333 transcripts; live: scan 8 / pull 2)
+- [x] app `connect()` → user sees an approval → approves → app gets a token  ✓ (verified LIVE, real Reddit)
+- [x] app reads via token only  ✓ (LIVE: reddit 51 items + otter-importer scan/pull, both no cookie)
+- [x] revoke → app's next read `401`s  ✓ (verified LIVE)
+- [x] page links the live route; a stranger can reproduce  ✓ (docs/index.html `plugin api` → `{node}/oauth3/api`)
+
+> **M1 COMPLETE (2026-06-24).** Single-tenant north-star verified end-to-end on the live
+> dstack node. otter-importer publishes via the existing TinyCloud path (read leg proven
+> token-only; upload leg unchanged, gated on `tc` auth). [M1] blocks below are all done.
 
 ---
 
@@ -130,6 +134,38 @@ as an `image` runtime. Confirm the route and fill it into `docs/index.html`
 (currently the red `{node}/teleport-plugins/api` placeholder).
 **Acceptance:** the demo runs end-to-end against the dstack node URL, and the page's
 "live" panel shows the real route.
+
+---
+
+## Milestone 1.5 — frictionless connect (the UX pass)
+
+Killing the "miserable clicky popup": app-initiated connect via the SDK, the extension
+as a wallet, sign in once instead of per-use secret paste.
+
+### [M1.5] Web sign-in + session-gated approve — DONE (2026-06-24)
+**Repo:** teleport-plugins. Sign in once at `{node}/login` → session token (localStorage,
+sent as `Authorization` since the daemon strips cookies). Approve page + owner-gated
+endpoints accept the session, so you approve apps with one click, no re-paste.
+**Acceptance:** ✓ verified LIVE in a real browser — connect → sign in once → Approve → token → read 51 reddit items.
+
+### [M1.5] SDK provider-detect + web fallback — DONE
+**Repo:** oauth3-sdk. `connect()` uses `window.oauth3` if present (the wallet), else the
+web approve flow. **Acceptance:** ✓ SDK works with no extension (web flow) and prefers the wallet.
+
+### [M1.5] Extension `window.oauth3` provider + auto cookie-copy — DONE (2026-06-24)
+**Repo:** oauth3-extension. App calls `connect()` → wallet shows one approval (the user
+gesture) → grabs the site's cookie jar (host perm granted on that gesture) → syncs +
+approves → hands back a token. Zero tabs.
+**Acceptance:** ✓ E2E in a container with the keyed test extension loaded, **local and LIVE** —
+app calls `oauth3.connect()`, one Connect click, wallet copies the jar to the TEE, app gets
+a token and reads 51 real Reddit items (`tok-reddit-1cbcc6c259e6…`). Cookies shredded after.
+
+### [M1.5] Passkey / TinyCloud sign-in (kill the last secret paste)
+**Repo:** teleport-plugins (+ oauth3-extension). Replace owner-secret login with a real
+per-user sign-in — passkey/WebAuthn (port from `oauth3-twitter-cookie`) or TinyCloud's
+signed-invocation identity. Plugs into the same `sessions.ts` layer (createSession keyed
+by a verified identity instead of "owner"). This is also the keystone for [M2] multi-tenant.
+**Acceptance:** sign in with a passkey (or TinyCloud) — no secret ever pasted; sessions per user.
 
 ---
 
