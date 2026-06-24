@@ -8,8 +8,10 @@ Companion to [ROADMAP.md](ROADMAP.md) (what to build) — this is *how it should
 Smoothness: ● smooth · ◑ ok, has friction · ○ rough/manual · ◌ not built yet
 
 > Reconciled 2026-06-24: the delegation handshake (connect + revoke) is built and
-> verified against real Reddit; J3 ● and J4/J6 advanced. Some implementing code is
-> in the working tree, push pending.
+> verified against real Reddit (J3 ●). **Instance now LIVE** at the dstack node
+> (`915c8197…/oauth3/`, `/health` ready, otter+reddit jars synced — #5 closed). J6 ●.
+> Remaining for the north-star: J4's full TinyCloud publish (#4). Some implementing
+> code is in the working tree, push pending.
 
 ---
 
@@ -108,5 +110,5 @@ Smoothness: ● smooth · ◑ ok, has friction · ○ rough/manual · ◌ not bu
 | **screenshot/DOM** | uses synced jar | uses synced jar | ✓ | — | ✓ |
 
 First end-to-end target = **otter-importer across J1→J2→J3→J4** (the north-star). J3 is
-green; what remains for the north-star is J4's full TinyCloud loop (#4) and the live
-deploy (#5). Browser (J5) and the approver (J7) follow.
+green and the **instance is live** (#5 done); the only thing left for the north-star is
+J4's full TinyCloud publish (#4). Browser (J5) and the approver (J7) follow.
