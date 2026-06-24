@@ -15,6 +15,34 @@ Sample apps: **otter-importer** (plugin path), **Login with Everything** /
 
 ---
 
+## Model (how to think about it — read first)
+
+The **cookie jar** (one per account you delegate) is the shared root. Many things
+draw on the same jar, and they differ on a **per-task** axis that cross-cuts
+everything else:
+
+- some tasks need **only the cookie** (a direct request — the plugin/adapter path),
+- some need a **browser carrying the cookie** (JS, rendering, a flow).
+
+That axis is *not* per-site: the same Otter jar can feed a cookie-only read and a
+browser task. So there's no rigid "adapter lane vs browser lane" — "needs a browser"
+is just a property some tasks have, on any site. Multiple consumers can ride the
+same jar, even redundantly. **That heterogeneous state is the default; do not
+pre-unify it.** Convergence (sharing read logic, multiplexing across apps) is an
+*opportunistic, gradual* improvement layered on later where it pays off — not a
+designed-in abstraction.
+
+**Authorization is two layers, both required:**
+
+1. **App-store listing** — an *agentic approver* gatekeeps which apps may exist /
+   be consumed (a default catalog, possibly the main way to use the plugin/sdk).
+   It's also where convergence gets *nudged* ("you're the 3rd app reading Otter —
+   here's the shared path"). Soft governance, not rigid.
+2. **Per-user grant** — even a listed app still needs *the user* to grant it onto
+   *their* jar (the `connect()` consent → revocable scoped token). Listing ≠ access.
+
+---
+
 ## North-star success condition
 
 > A person who has installed **nothing** delegates read access to their Otter
@@ -27,11 +55,27 @@ Acceptance (each demonstrably true, not asserted):
 
 - [ ] instance live at a confirmed route on the dstack node (attested)
 - [ ] paste Otter cookie, no extension → `200`, jar sealed
-- [ ] `otter.list()` returns real notes; `fetch()` returns a real transcript
+- [x] `otter.list()` returns real notes; `fetch()` returns a real transcript  ✓ (333 transcripts, container run)
 - [ ] app `connect()` → user sees an approval → approves → app gets a token
 - [ ] app reads via token only; imports to TinyCloud
 - [ ] revoke → app's next read `401`s
 - [ ] page links the live demo + repos; a stranger can reproduce
+
+---
+
+## Built so far (reconciled 2026-06-24)
+
+- Adapter interface + `_template.ts`; **otter** + **youtube** adapters; **reddit** in
+  progress (parallel session).
+- Sealed cookie vault, scoped tokens, extension jar-sync + auto-sync.
+- **General `cli.ts`** — plugins/sync/token/read; no extension or browser needed.
+- **Federation `verify`** measurement-pin (trust the code, not the operator) — also a
+  verify panel in the extension popup.
+- Otter **E2E-verified** against a real account (333 transcripts).
+- 3 repos pushed; Pages live at teleport-computer.github.io/teleport-plugins.
+
+GitHub issues #1–#10 mirror the blocks below (#1 closed — Otter verified). Parallel
+sessions: **TinyCloud** multi-tenant substrate (#7), **reddit** adapter.
 
 ---
 
@@ -58,6 +102,8 @@ SDK already calls these; server returns 404 today.
   grant, mint the scoped token and flip the request to `approved`.
 **Acceptance:** `oauth3-sdk` `connect()` completes against the live server — prints
 a URL, user approves, app receives a working token. No owner secret in the app.
+This is **layer 2** (per-user grant) of the two-layer auth; pairs with the
+app-store approver below, which is layer 1 (a listed app still needs this grant).
 
 ### [M1] Token revocation
 **Repo:** teleport-plugins (+ oauth3-extension button) · **Blocks:** the revoke step
@@ -90,6 +136,16 @@ as an `image` runtime. Confirm the route and fill it into `docs/index.html`
 
 The page is written present-tense for these; today's server does **not** do them.
 Either build them or scope the copy (`docs/index.html`).
+
+### [M2] Agentic app-store approver (listing — auth layer 1)
+**Repo:** teleport-plugins (+ a listing UI) · the curation gate.
+An agent that vets apps and maintains a **default listing** — possibly the main or
+only way to consume the plugin/sdk. Gatekeeps *which apps may exist*; does **not**
+replace the per-user grant ([M1] connect). It's also where convergence is nudged
+(spotting N apps reading the same site/scope and offering a shared path). Keep it
+**soft** — a default catalog + recommendations, not a rigid choke point.
+**Acceptance:** an app must be in the approved listing to be consumable; a listed
+app still requires a per-user `connect()` grant before it can read.
 
 ### [M2] Multi-tenant (per-user keys, not one owner secret)
 **Repo:** teleport-plugins · today: single `OWNER_SECRET`, vault keyed by *plugin*.
