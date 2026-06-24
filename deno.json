@@ -1,0 +1,7 @@
+{
+  "tasks": {
+    "start": "deno run --allow-net --allow-read --allow-write --allow-env --env-file=.env server/main.ts",
+    "dev": "deno run --watch --allow-net --allow-read --allow-write --allow-env --env-file=.env server/main.ts"
+  },
+  "fmt": { "lineWidth": 100, "indentWidth": 2 }
+}

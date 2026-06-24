@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>oauth3 — teleport experiment 008</title>
+<meta name="description" content="The oauth3 plugin: delegated read access to your accounts without surrendering your cookies. Your jar lives in a sealed room you control; apps get scoped, revocable read tokens — never the jar. A teleport experiment, with TinyCloud." />
+<meta property="og:title" content="oauth3 — teleport experiment 008" />
+<meta property="og:description" content="Delegated read access without surrendering your cookies. The jar lives in a TEE you control; apps get scoped, revocable tokens — never the jar." />
+<meta property="og:type" content="website" />
+<style>
+  :root {
+    --ink: #16140f;
+    --paper: #f4f0e7;
+    --panel: #ece6d9;
+    --faint: #6b6557;
+    --rule: #d8d2c4;
+    --accent: #b4441f;
+    --gutter: clamp(20px, 7vw, 130px);
+    --mono: ui-monospace, SFMono-Regular, Menlo, "Cascadia Code", monospace;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size: 18px; line-height: 1.62; -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 0 var(--gutter); }
+
+  header.top {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 34px var(--gutter) 0;
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em;
+    text-transform: lowercase; color: var(--faint);
+  }
+  header.top a { text-decoration: none; }
+  header.top a:hover { color: var(--ink); }
+
+  .hero { padding: 13vh 0 0; }
+  .exp-no {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .2em;
+    color: var(--accent); text-transform: lowercase; margin: 0 0 18px;
+  }
+  h1 {
+    font-weight: 400; font-size: clamp(54px, 12vw, 112px); line-height: .92;
+    letter-spacing: -.02em; margin: 0; text-transform: lowercase;
+  }
+  .tagline {
+    font-style: italic; color: var(--faint);
+    font-size: clamp(18px, 2.4vw, 22px); margin: 20px 0 0;
+  }
+
+  section.block { padding: 8vh 0 0; }
+  h2 {
+    font-family: var(--mono); font-weight: 500; font-size: 13px;
+    letter-spacing: .18em; text-transform: lowercase; color: var(--accent);
+    margin: 0 0 22px;
+  }
+  p { margin: 0 0 1.4em; }
+  strong { font-weight: 600; }
+  em { font-style: italic; }
+
+  .question {
+    margin: 8vh 0 0; padding: 30px 0; border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+  .question .lbl {
+    display: block; font-family: var(--mono); font-size: 11px; letter-spacing: .2em;
+    text-transform: lowercase; color: var(--accent); margin-bottom: 12px;
+  }
+  .question p {
+    margin: 0; font-size: clamp(21px, 3.3vw, 29px); line-height: 1.3;
+    font-style: italic; letter-spacing: -.01em;
+  }
+
+  /* live panel */
+  .live { background: var(--panel); border: 1px solid var(--rule); border-radius: 14px; padding: 26px 28px; }
+  .live .row { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 11px 0; border-bottom: 1px solid var(--rule); }
+  .live .row:last-child { border-bottom: 0; }
+  .live .k { font-family: var(--mono); font-size: 12px; letter-spacing: .06em; text-transform: lowercase; color: var(--faint); white-space: nowrap; }
+  .live .v { font-family: var(--mono); font-size: 12.5px; text-align: right; word-break: break-all; }
+  .live .v a { text-decoration: none; border-bottom: 1px solid var(--accent); }
+  .tbd { color: var(--accent); }
+
+  /* flow + tables */
+  table { width: 100%; border-collapse: collapse; font-size: 16px; margin: 4px 0 0; }
+  th, td { text-align: left; padding: 11px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: lowercase; color: var(--faint); font-weight: 500; }
+  td code, p code, li code { font-family: var(--mono); font-size: 13px; background: var(--panel); padding: 1px 6px; border-radius: 5px; }
+  td .sub { color: var(--faint); font-family: var(--mono); font-size: 11px; letter-spacing: .04em; }
+
+  pre {
+    background: var(--ink); color: #ece6d9; border-radius: 12px; padding: 20px 22px;
+    overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.7;
+    margin: 0 0 18px;
+  }
+  pre .c { color: #9b9482; }
+  pre .a { color: #e6915f; }
+
+  ol.steps { padding-left: 0; list-style: none; counter-reset: s; }
+  ol.steps > li { counter-increment: s; position: relative; padding: 0 0 26px 46px; }
+  ol.steps > li::before {
+    content: counter(s); position: absolute; left: 0; top: -2px;
+    width: 28px; height: 28px; border: 1px solid var(--accent); color: var(--accent);
+    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 13px;
+  }
+  ol.steps h3 { margin: 0 0 6px; font-size: 18px; font-weight: 600; }
+  ol.steps p { margin: 0 0 12px; }
+
+  .links { display: flex; flex-wrap: wrap; gap: 12px; padding: 8vh 0 0; font-family: var(--mono); font-size: 13px; text-transform: lowercase; letter-spacing: .03em; }
+  .links a { text-decoration: none; border: 1px solid var(--rule); border-radius: 999px; padding: 8px 16px; transition: all .15s ease; }
+  .links a:hover { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+
+  footer {
+    margin-top: 13vh; padding: 30px 0 60px; border-top: 1px solid var(--rule);
+    font-family: var(--mono); font-size: 12px; color: var(--faint);
+    text-transform: lowercase; letter-spacing: .08em;
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  }
+  footer a { text-decoration: none; }
+  footer a:hover { color: var(--ink); }
+</style>
+</head>
+<body>
+  <header class="top">
+    <a href="https://teleport.computer/experiments">teleport · experiments</a>
+    <span>exp 008</span>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <p class="exp-no">exp 008</p>
+      <h1>oauth3</h1>
+      <p class="tagline">the delegation plugin · read access to your accounts without surrendering your cookies · with tinycloud · 2026</p>
+    </section>
+
+    <!-- teleport-computer concept, woven with oauth3 -->
+    <section class="block">
+      <h2>sealed rooms</h2>
+      <p><strong>Teleport</strong> builds with TEEs &mdash; trusted execution environments, sealed rooms that even the machine&rsquo;s operator can&rsquo;t see into. One bet runs through every teleport experiment: once anyone can spin up a room no one can reach into, the things we trust to passwords, platforms, and OAuth scopes can move somewhere you actually control. <em>Teleport.Best</em> put one-shot identity in a room. <em>Login With Anything</em> put authentication in one. <strong>oauth3</strong> puts your credentials there.</p>
+    </section>
+
+    <section class="block">
+      <h2>the problem</h2>
+      <p>Most of the web has no OAuth. To let an app read your Otter transcripts or your YouTube history, you hand over the whole cookie jar &mdash; and with it, everything that jar can do. &ldquo;Log in with X&rdquo; was supposed to scope that down; in practice it hands over a standing session, and the rest of the web just takes your raw cookies. Delegation collapses into surrender.</p>
+    </section>
+
+    <section class="block">
+      <h2>what oauth3 does</h2>
+      <p>oauth3 breaks the handoff into three pieces, with the jar sealed inside a room you control:</p>
+      <ul>
+        <li>an <strong>extension</strong> syncs your whole cookie jar for a site into the sealed room;</li>
+        <li>a <strong>plugin</strong> turns that jar into clean <code>list</code> / <code>fetch</code> reads for one site&rsquo;s unofficial API;</li>
+        <li>a <strong>scoped token</strong> lets an app or agent make those reads &mdash; carrying the holder&rsquo;s identity, never the jar.</li>
+      </ul>
+      <p>Revoke the token and the access is gone. The jar never left the room, and the app never held it. Running on <strong>TinyCloud</strong>&rsquo;s signed-invocation substrate, the room is multi-tenant &mdash; a sovereign auth layer where the user&rsquo;s keys, not the platform&rsquo;s, decide who gets what.</p>
+    </section>
+
+    <section class="block">
+      <h2>how it works</h2>
+<pre> extension  ──jar──►  <span class="c">server (TEE)</span>
+                      seals the jar in vault[plugin]
+                      mints a scoped read token
+                              │
+                           token
+                              ▼
+ app / agent ──Bearer token──►  /api/<span class="a">:plugin</span>/items
+                                /api/<span class="a">:plugin</span>/items/<span class="a">:id</span>
+             ◄──────── data ────  <span class="c">(never the jar)</span></pre>
+      <p>In production the server is a tee-daemon project on a dstack node; the jar is sealed at rest (AES-GCM) and a background loop polls each plugin on a schedule.</p>
+    </section>
+
+    <section class="block">
+      <h2>plugins</h2>
+      <table>
+        <thead><tr><th>id</th><th>site</th><th>reads</th></tr></thead>
+        <tbody>
+          <tr><td><code>otter</code></td><td>otter.ai</td><td>list notes, fetch diarized transcripts</td></tr>
+          <tr><td><code>youtube</code></td><td>youtube.com</td><td>watch history &mdash; proves the interface generalizes</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="block">
+      <h2>two paths</h2>
+      <p>Most sites expose an unofficial API a <strong>plugin</strong> can read &mdash; cheap, no browser, and any federated oauth3 instance can serve it. <em>(Federation is coming soon.)</em></p>
+      <p>Some sites have no usable API at all. There the sealed room drives a <strong>real browser</strong> &mdash; generic <em>login-with-anything</em> screenshots, or login by <strong>TikTok QR code</strong> with no plugin written at all. That path is expensive, so it&rsquo;s metered: you spend credit to use it.</p>
+    </section>
+
+    <section class="block">
+      <h2>access</h2>
+      <table>
+        <thead><tr><th>tier</th><th>what you get</th></tr></thead>
+        <tbody>
+          <tr><td><strong>free trial</strong><br><span class="sub">hosted by teleport</span></td><td>Start now on our dstack node. Plugin reads are free; spend credit to unlock the browser path (<em>login-with-anything</em>, TikTok QR).</td></tr>
+          <tr><td><strong>self-host</strong><br><span class="sub">your own dstack</span></td><td>Run the whole thing yourself in a TEE you control &mdash; no credit, no metering. Your node, your keys.</td></tr>
+          <tr><td><strong>federated</strong><br><span class="sub">soon</span></td><td>For plugin reads, point at any federated oauth3 instance. No browser, no central host.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- LIVE: confirm/replace the placeholder values -->
+    <section class="block">
+      <h2>live</h2>
+      <div class="live">
+        <div class="row"><span class="k">demo</span><span class="v"><a href="https://oauth3.monerolink.com">oauth3.monerolink.com</a></span></div>
+        <div class="row"><span class="k">dstack node</span><span class="v"><a href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network">915c8197…-8080.dstack-pha-prod7.phala.network</a></span></div>
+        <div class="row"><span class="k">plugin api</span><span class="v tbd">{node}/teleport-plugins/api &nbsp;·&nbsp; confirm route</span></div>
+      </div>
+    </section>
+
+    <section class="block">
+      <h2>use it</h2>
+      <ol class="steps">
+        <li>
+          <h3>get your jar in</h3>
+          <p>Two ways &mdash; <strong>you don&rsquo;t need the extension.</strong> With it: load <a href="https://github.com/teleport-computer/oauth3-extension">oauth3-extension</a> unpacked, set the instance URL + owner secret, pick a plugin, <strong>Sync jar now</strong> (then it auto-syncs on cookie change and every 30 min). Without it: copy the cookie from devtools and POST it yourself &mdash; one curl, no install.</p>
+<pre><span class="c"># no extension — paste the cookie(s) for the plugin's site</span>
+curl -s <span class="a">$NODE</span>/api/cookies -H <span class="a">"Authorization: Bearer $OWNER_SECRET"</span> \
+  -H <span class="a">'Content-Type: application/json'</span> \
+  -d <span class="a">'{"plugin":"otter","cookies":{"sessionid":"…","csrftoken":"…"}}'</span></pre>
+        </li>
+        <li>
+          <h3>mint a scoped read token</h3>
+          <p>With your <code>OWNER_SECRET</code>, mint a token for one plugin and subject. The token is all the app needs &mdash; it never sees the jar.</p>
+<pre><span class="c"># mint a scoped read token for the otter plugin</span>
+curl -s <span class="a">$NODE</span>/api/tokens -H <span class="a">"Authorization: Bearer $OWNER_SECRET"</span> \
+  -H <span class="a">'Content-Type: application/json'</span> -d <span class="a">'{"plugin":"otter","subject":"andrew"}'</span></pre>
+        </li>
+        <li>
+          <h3>read with the token</h3>
+          <p>The app or agent calls the plugin&rsquo;s read API with the scoped token. No raw cookies, ever.</p>
+<pre><span class="c"># list, then fetch one item</span>
+curl -s <span class="a">$NODE</span>/api/otter/items        -H <span class="a">"Authorization: Bearer tok-otter-…"</span>
+curl -s <span class="a">$NODE</span>/api/otter/items/<span class="a">&lt;otid&gt;</span> -H <span class="a">"Authorization: Bearer tok-otter-…"</span></pre>
+        </li>
+      </ol>
+    </section>
+
+    <section class="block">
+      <h2>sample apps</h2>
+      <p>Two apps, one on each path &mdash; the same delegation, different cost.</p>
+      <table>
+        <thead><tr><th>app</th><th>path</th><th>what it does</th></tr></thead>
+        <tbody>
+          <tr><td><strong>otter-importer</strong></td><td>plugin</td><td>Pulls your Otter transcripts into TinyCloud holding only a scoped token, never the cookie. Built on <code>oauth3-sdk</code>.</td></tr>
+          <tr><td><strong>Login with Everything</strong></td><td>browser</td><td>Log into any site through the sealed room &mdash; no plugin, no API, just a cookie or a QR scan. The metered browser path.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="question">
+      <span class="lbl">question</span>
+      <p>If every credential lived in a room only you could open, what would &ldquo;log in with X&rdquo; become?</p>
+    </section>
+
+    <nav class="links">
+      <a href="https://github.com/teleport-computer/teleport-plugins">server</a>
+      <a href="https://github.com/teleport-computer/oauth3-extension">extension</a>
+      <a href="https://github.com/teleport-computer/oauth3-sdk">sdk</a>
+      <a href="https://github.com/teleport-computer/login-with-anything">login-with-everything</a>
+      <a href="https://oauth3.monerolink.com">demo</a>
+      <a href="https://tinycloud.xyz">tinycloud</a>
+      <a href="https://teleport.computer">teleport</a>
+    </nav>
+
+    <footer>
+      <span>teleport experiment 008 · oauth3</span>
+      <a href="https://teleport.computer/experiments">← all experiments</a>
+    </footer>
+  </main>
+</body>
+</html>

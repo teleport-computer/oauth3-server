@@ -1,0 +1,8 @@
+{
+  "runtime": "deno",
+  "entry": "handler.ts",
+  "isolation": "container",
+  "mode": "dev",
+  "env": { "POLL_INTERVAL_MIN": "30" },
+  "env_passthrough": ["OWNER_SECRET", "SEAL_KEY"]
+}
