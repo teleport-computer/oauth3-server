@@ -34,6 +34,7 @@ export const redditPlugin: Plugin = {
   id: "reddit",
   label: "Reddit saved",
   cookieDomains: [".reddit.com"],
+  renderUrl: "https://www.reddit.com",
 
   loggedIn(jar: Jar): boolean {
     return !!jar["reddit_session"];

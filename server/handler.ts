@@ -11,6 +11,7 @@
 //   POST   /api/connect/:requestId/approve|deny  owner_secret — the user's decision
 //   GET    /approve/:requestId                HTML approval screen
 //   GET    /api/:plugin/items[/:id]           scoped token OR owner — read
+//   GET    /api/:plugin/screenshot            scoped token OR owner — logged-in render via Browser SPI
 
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
 import { deleteJar, getJar, initVault, jarStatus, setJar } from "./vault.ts";
@@ -22,10 +23,12 @@ import { approvePage } from "./approve-page.ts";
 import { loginPage } from "./login-page.ts";
 import { createSession, destroySession, initSessions, verifySession } from "./sessions.ts";
 import { newChallenge, verifyDidSignIn } from "./identity.ts";
+import { browserScreenshot } from "./browser.ts";
 
 let ready = false;
 let ownerSecret = "";
 let publicUrl = "";
+let browserSpiUrl = "";
 
 export interface HandlerCtx { env: Record<string, string>; dataDir?: string; }
 
@@ -38,6 +41,7 @@ async function init(env: Record<string, string>, dataDir: string) {
   await initSessions(dataDir);
   ownerSecret = env.OWNER_SECRET || env.OAUTH3_OWNER_SECRET || env.EXT_SHARED_SECRET || "";
   publicUrl = (env.PUBLIC_URL || "").replace(/\/$/, "");
+  browserSpiUrl = (env.BROWSER_SPI_URL || "").replace(/\/$/, "");
   if (!ownerSecret) console.warn("[init] OWNER_SECRET missing — cookie sync and minting will reject");
   startScheduler(env, dataDir);
   ready = true;
@@ -213,6 +217,29 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   const ap = path.match(/^\/approve\/([^/]+)$/);
   if (req.method === "GET" && ap) {
     return html(approvePage(getConnect(ap[1]), ap[1]));
+  }
+
+  // --- logged-in render via the Browser SPI (same vault jar as /items) ---
+  const sc = path.match(/^\/api\/([a-z0-9-]+)\/screenshot$/);
+  if (req.method === "GET" && sc) {
+    const plugin = getPlugin(sc[1]);
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verify(bearer, plugin.id);
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const jar = getJar(subj, plugin.id);
+    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    const target = url.searchParams.get("url") || plugin.renderUrl ||
+      `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
+    try {
+      const shot = await browserScreenshot(browserSpiUrl, plugin, jar, target);
+      await audit("screenshot", { plugin: plugin.id, url: target, by: t ? (t.app || t.subject || "token") : "owner" });
+      return json({ plugin: plugin.id, url: target, ...shot });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
   }
 
   // --- reads (scoped token or owner) ---
