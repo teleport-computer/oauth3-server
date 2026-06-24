@@ -66,6 +66,33 @@ Acceptance (each demonstrably true, not asserted):
 > dstack node. otter-importer publishes via the existing TinyCloud path (read leg proven
 > token-only; upload leg unchanged, gated on `tc` auth). [M1] blocks below are all done.
 
+> **Reconciliation (2026-06-24, demo-hardening session).** Distinguishing *code-complete*
+> from *reproducibly-demoable*, after reading the code (not the checkmarks):
+> - **CODE-COMPLETE & verified at this level:** instance live + healthy at the real route
+>   (`…dstack-pha-prod7.phala.network/oauth3/`, `#13` env_passthrough fix in the running
+>   daemon, real route on `docs/index.html` — placeholder gone); connect→approve→token consent
+>   flow wired E2E in both extension and web-fallback paths (the "SDK gets 404" caveat is
+>   stale — all endpoints serve); otter-importer token-only **read** path real and now
+>   doc'd + e2e-tested (proves no cookie touched); reddit adapter functionally complete
+>   (saved-post list + item fetch over the legacy `.json` cookie API).
+> - **NOT yet a reproducible live demo (the real remaining M1 gate):** "working app demo"
+>   needs a live run with a **real jar** for reddit (and an otter re-run) — neither is
+>   reproducible from code alone, and the page's "live-verified"/"333 transcripts" claims
+>   are assertions, not artifacts. **Open risk:** the cookie-only reddit adapter fetches
+>   `www.reddit.com` *directly from the pod's datacenter IP* — the same IP Reddit's
+>   network-security wall 403'd in the browser test; the legacy `.json` surface may or may
+>   not be behind that WAF. If it is, reddit needs a **pod-side egress proxy** (the
+>   ProtonVPN→SOCKS5 sidecar already used for the browser path).
+> - **Deferred to M2 (not M1 blockers):** the deployed project is `mode: dev`, not
+>   `attested`, so the trust/measurement-pin story isn't exercisable on this instance yet;
+>   TinyCloud **upload** leg still needs `tc` auth (token-only covers the read leg only).
+> - **Stale-doc cleanups owed:** the `[M1]` Otter-live-verify / port / deploy blocks below
+>   and `README.md:103-108` (`#13`) still read as pending though the work landed — reconcile
+>   per-block once the live run settles the verified-vs-pending question.
+> - **Out of M1 scope (parked, post-M1 convergence):** the browser→replayable-API
+>   reification loop — the "opportunistic convergence" named in the Model above — is now
+>   spec'd in `rfcs/0001-adapter-reification-loop.md`. It is *not* an M1 app demo.
+
 ---
 
 ## Built so far (reconciled 2026-06-24)
