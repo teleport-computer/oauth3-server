@@ -64,9 +64,11 @@ export const otterPlugin: Plugin = {
     const seen = new Map<string, any>();
     // owned + shared in parallel (sequential was ~2x slower and tripped the gateway timeout).
     // A failing source propagates — no error masking.
+    // Cap the default page so the read stays fast (the big page tripped the gateway
+    // timeout). Most-recent first; the consumer pages further on its own.
     const lists = await Promise.all(
       ["owned", "shared"].map((source) =>
-        getJSON("/speeches", jar, { userid: uid, page_size: "200", source })
+        getJSON("/speeches", jar, { userid: uid, page_size: "20", source })
       ),
     );
     for (const res of lists) {
