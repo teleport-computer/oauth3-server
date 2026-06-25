@@ -1,12 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <!-- round seal with safe padding so masks/frames don't crop it -->
-  <circle cx="64" cy="64" r="52" fill="#111111"/>
-  <circle cx="64" cy="64" r="46.5" fill="none" stroke="#ffffff" stroke-width="3"/>
-  <circle cx="64" cy="64" r="41.5" fill="none" stroke="#ffffff" stroke-width="1.8"/>
-  <text x="64" y="66.5" text-anchor="middle" dominant-baseline="central"
-        font-family="system-ui, 'DejaVu Sans', sans-serif" font-weight="800" font-size="50" fill="#ffffff">&#8704;</text>
-  <!-- green 3, tucked at the seal's lower-right (inside the canvas margin) -->
-  <circle cx="94" cy="94" r="12.5" fill="#ffffff"/>
-  <text x="94" y="95" text-anchor="middle" dominant-baseline="central"
-        font-family="Georgia, serif" font-weight="800" font-size="19" fill="#2f8f3e">3</text>
+  <!-- FULL-BLEED disc: a circular mask of any radius just trims black-on-black -->
+  <circle cx="64" cy="64" r="64" fill="#111111"/>
+  <!-- rings + content kept inside the safe zone -->
+  <circle cx="64" cy="64" r="54" fill="none" stroke="#ffffff" stroke-width="3"/>
+  <circle cx="64" cy="64" r="48.5" fill="none" stroke="#ffffff" stroke-width="1.6"/>
+  <text x="64" y="66" text-anchor="middle" dominant-baseline="central"
+        font-family="system-ui, 'DejaVu Sans', sans-serif" font-weight="800" font-size="46" fill="#ffffff">&#8704;</text>
+  <!-- green 3 INSIDE the disc (lower-right), within the safe zone so masks never clip it -->
+  <circle cx="85" cy="87" r="11" fill="#ffffff"/>
+  <text x="85" y="88" text-anchor="middle" dominant-baseline="central"
+        font-family="Georgia, serif" font-weight="800" font-size="16" fill="#2f8f3e">3</text>
 </svg>
