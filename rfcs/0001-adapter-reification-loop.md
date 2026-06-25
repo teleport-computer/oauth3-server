@@ -159,9 +159,10 @@ Unresolved; settle before implementation. The self-healing claim hinges on (2).
    Pin the key before the registry exists.
 
 ## Out of Scope
-- The dstack-webhost evidence-spend loop (RFC 0021). That spend produces consumer-
-  checkable attestation evidence; this one produces a cheaper execution path. Separate
-  repos, separate loops.
+- The dstack-webhost evidence-spend loop (`tee-daemon/rfcs/0021`). That spend produces
+  consumer-checkable attestation evidence; this one produces a cheaper execution path.
+  Separate repos, separate loops. (Both are instances of the shrink-the-costly-middle
+  discipline — **RFC 0000** — with browser-as-ground-truth as this loop's validator.)
 - Publishing the JIT-tiering framing as a public concept or metaphor. This RFC is the
   built mechanism; the framing stays internal until something runs end-to-end.
 - Cross-app convergence (multiplexing one reified spec across several apps reading the

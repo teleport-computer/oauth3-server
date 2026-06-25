@@ -222,6 +222,34 @@ replace the per-user grant ([M1] connect). It's also where convergence is nudged
 **soft** — a default catalog + recommendations, not a rigid choke point.
 **Acceptance:** an app must be in the approved listing to be consumable; a listed
 app still requires a per-user `connect()` grant before it can read.
+**Design:** `rfcs/0003-delegation-continuum.md` gives this its algorithm — one
+delegation primitive parameterized by *attenuation × verifiability*; the approver
+reads the requester's TEE-daemon attestation + the requested breadth, routes to
+friction (trivial / informed-tap / **dev-mode** for broad-and-unverifiable), and
+*steers* off-menu requests toward consolidated reviewed patterns. App-vs-adapter is a
+soft convention, not a type; egress-lock is the default pattern, not a hard floor.
+`rfcs/0004-capability-statements.md` gives the approver its *language* (generative,
+closure-bearing capability statements — "reads all your watch history, and nothing
+else") and the *verification portfolio* that discharges them cheap→premium (LLM-judge
+· developer-supplied evidence · trust-by-construction · info-flow-proven), escalated
+only where it pays. Plan the eval corpus from day one (it's how we tune the curator).
+Deferred mirror: **consent profiles** (user prefs pre-negotiate before bothering them).
+
+### [M2] Runtime step-up authorization (auth layer 3) — spec'd
+**Repo:** oauth3-server (+ notification sinks) · `rfcs/0005-runtime-step-up-authorization.md`.
+A third authz layer at *invocation* time (layers 1/2 = listing + grant): even with a
+valid token, a risky read can pause and ask the user to confirm out-of-band — the
+**credit-card fraud-check model**. The *issuer* decides, not the app (app sees only
+"challenge pending — retry"). auto-approve / auto-reject / step-up-the-middle, scored on
+risk signals (first use, volume spike, new device, odd hour, breadth). **Curator
+baseline guards** (optional default, opt-out-able) + **per-user policy** layered on,
+stricter-wins, no silent weakening. Out-of-band channel is user-linked (Matrix-first).
+Rides td-0018's reauthorize flow. Sibling to consent profiles (use-time vs grant-time).
+
+> **Design discipline (cross-cutting):** `rfcs/0000-opportunistic-spend.md` names the
+> shrink-the-costly-middle loop shared by the audit-spend (0004), adapter-reification
+> (0001), and step-up (0005) loops: a cheap default + an expensive path + a usage/risk
+> allocator + a day-one feedback corpus that narrows the middle. Future loops conform.
 
 ### [M2] Multi-tenant (per-user keys, not one owner secret) — DONE (2026-06-24, live-verified)
 **Repo:** oauth3-server + oauth3-extension.
@@ -247,10 +275,27 @@ migrated jars (otter 49 / reddit 22 / nytimes 31) intact. `DELETE /api/cookies/:
 used it to scrub the test tenant. Remaining identity upgrade: passkey/TinyCloud sign-in
 (the block below) — optional, never imposed.
 
+### [M2] Federated login providers (GitHub / Google / Matrix) — spec'd, not built
+**Repo:** oauth3-server · `rfcs/0002-federated-login-providers.md`.
+Three more `subject` providers on the existing `createSession(subject)` layer (above):
+`gh:<id>`, `google:<sub>`, `matrix:<@u:hs>`. All three serve arbitrary external users
+with **no provider approval** (GitHub: none; Google: basic scopes only; Matrix:
+per-homeserver). Enabled iff creds present; creds via `ctx.env` (NOT top-level
+`Deno.env` — `--deny-env`). Identifier-only (no user-held key), which is why OpenKey/
+TinyCloud isn't needed for login. RFC has per-provider flows + SSRF/state guards.
+
 ### [M2] Federation
 **Repo:** oauth3-server / oauth3-sdk · "any federated instance" isn't built.
 Page already says *soon* — keep it honest. Likely: instance directory + the SDK
 picking which instance serves a plugin.
+**Cross-pod data rooms + ambassadors (deeper federation):**
+`rfcs/0006-ambassadors-and-data-rooms.md` (app layer) on `tee-daemon/rfcs/0024`
+(platform). Generalizes **Nerla's `OptOutAppAuth`** opt-out from *versions* →
+*code-identities*, so **upgrade = federate-with-peer = admit-ambassador** are one
+governed+opt-out operation. An ambassador is just a cross-operator RFC 0003 delegation
+(verifiability = its attestation, attenuation = the room's egress lock). Two modes:
+**in-place** (compute-to-data) and **re-encrypted share** (data-to-compute, Nerla/
+TinyCloud style). Mutual-attestation handshake (each pod `verify()`s the other).
 
 ### [M2] Trust story
 **Repo:** oauth3-extension / oauth3-sdk · attestation-pinning (verify the instance's
