@@ -27,21 +27,18 @@
   .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .16em;
     text-transform: uppercase; color: var(--accent); margin: 0 0 14px; }
   h1 { font-weight: 400; font-size: clamp(38px, 7vw, 64px); line-height: 1; letter-spacing: -.02em; margin: 0; }
-  .standfirst { font-size: clamp(18px, 2.4vw, 22px); line-height: 1.4; margin: 20px 0 0; max-width: 30em; color: #353029; }
+  .standfirst { font-size: clamp(18px, 2.4vw, 22px); line-height: 1.4; margin: 20px 0 0; max-width: 32em; color: #353029; }
   .meta { font-family: var(--mono); font-size: 12px; color: var(--faint); margin-top: 18px; letter-spacing: .04em; }
   section.block { padding: 54px 0 0; }
   h2 { font-family: var(--mono); font-weight: 500; font-size: 12px; letter-spacing: .18em;
     text-transform: lowercase; color: var(--accent); margin: 0 0 14px; }
-  h2 .n { color: var(--faint); }
   h3 { font-size: 21px; margin: 0 0 8px; font-weight: 600; }
   p { margin: 0 0 1em; } strong { font-weight: 600; } em { font-style: italic; }
-  ul { margin: 0 0 1em; padding-left: 1.1em; } li { margin: 0 0 .4em; }
   code { font-family: var(--mono); font-size: .82em; background: var(--panel); padding: 1px 5px; border-radius: 4px; }
   .lead { font-size: 19px; }
-  /* generic figure */
+  .inline { border-bottom: 1px solid var(--accent); text-decoration: none; }
   figure { margin: 18px 0 6px; }
   figcaption { font-family: var(--mono); font-size: 11.5px; color: var(--faint); margin-top: 8px; letter-spacing: .03em; }
-  .box { background: var(--panel); border: 1px solid var(--rule); border-radius: 12px; }
   /* the dial */
   .dial { height: 54px; border-radius: 999px; border: 1px solid var(--rule);
     background: linear-gradient(90deg, #e7efe7 0%, #f0e7d9 55%, #f3ddd2 100%);
@@ -54,17 +51,11 @@
   .grid2 .cell { padding: 12px 14px; border: 1px solid var(--rule); border-radius: 10px; background: var(--panel); font-size: 14.5px; }
   .grid2 .axis { background: transparent; border: none; font-family: var(--mono); font-size: 11px;
     text-transform: uppercase; letter-spacing: .05em; color: var(--faint); display: flex; align-items: center; }
-  .grid2 .hd { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); background: transparent; border: none; text-align: center; }
+  .grid2 .hd { font-family: var(--mono); font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); background: transparent; border: none; text-align: center; }
   .cell .tag { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; display: block; margin-bottom: 4px; }
   .easy .tag { color: var(--green); } .mid .tag { color: var(--blue); } .hard .tag { color: var(--accent); }
   @media (max-width: 620px) { .grid2 { grid-template-columns: 1fr; } .grid2 .axis, .grid2 .hd { display: none; } }
-  /* stacked layers */
-  .layers { display: flex; flex-direction: column; gap: 8px; }
-  .layer { display: flex; gap: 14px; align-items: baseline; padding: 14px 16px; border: 1px solid var(--rule); border-radius: 10px; background: var(--panel); }
-  .layer .num { font-family: var(--mono); font-size: 11px; color: var(--accent); white-space: nowrap; }
-  .layer .ttl { font-weight: 600; font-size: 16px; }
-  .layer .sub { color: var(--faint); font-size: 14px; }
-  /* three loops */
+  /* loops */
   .loops { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
   @media (max-width: 700px) { .loops { grid-template-columns: 1fr; } }
   .loop { border: 1px solid var(--rule); border-radius: 12px; background: var(--panel); padding: 16px; font-size: 14px; }
@@ -73,16 +64,16 @@
   .loop .cheap, .loop .dear { padding: 5px 8px; border-radius: 6px; font-family: var(--mono); font-size: 11px; line-height: 1.3; flex: 1; }
   .loop .cheap { background: #e7efe7; } .loop .dear { background: #f3ddd2; }
   .loop .arr { font-family: var(--mono); font-size: 11px; color: var(--faint); white-space: nowrap; }
-  .loop .res { font-family: var(--mono); font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; margin-top: 10px; }
+  .loop .res { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin-top: 10px; line-height: 1.4; }
   /* two-layer map */
   .stack { display: flex; flex-direction: column; gap: 10px; }
   .band { border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; }
   .band.app { background: #f0ece2; } .band.plat { background: #e9e4d6; }
   .band .lbl { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 10px; }
   .chips { display: flex; flex-wrap: wrap; gap: 7px; }
-  .chip { font-family: var(--mono); font-size: 12px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--rule); background: var(--paper); white-space: nowrap; }
+  .chip { font-family: var(--mono); font-size: 12px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--rule); background: var(--paper); white-space: nowrap; text-decoration: none; color: inherit; transition: border-color .12s; }
   .chip b { color: var(--accent); font-weight: 600; }
-  .chip.live { border-color: var(--green); } .chip.live b { color: var(--green); }
+  a.chip:hover { border-color: var(--accent); }
   .between { text-align: center; font-family: var(--mono); font-size: 11px; color: var(--faint); letter-spacing: .04em; }
   /* flow */
   .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
@@ -92,9 +83,10 @@
   table { width: 100%; border-collapse: collapse; font-size: 14.5px; margin-top: 6px; }
   td, th { text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
   th { font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
-  td .id { font-family: var(--mono); font-size: 12.5px; color: var(--accent); white-space: nowrap; }
+  td .id { font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+  td .id a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent); }
   .st { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
-  .st.live { background: #e0ece0; color: var(--green); } .st.spec { background: var(--panel); color: var(--faint); }
+  .st.spec { background: var(--panel); color: var(--faint); }
   .note { font-size: 14.5px; color: var(--faint); }
   footer { margin-top: 64px; padding: 22px 0 56px; border-top: 1px solid var(--rule);
     font-family: var(--mono); font-size: 12px; color: var(--faint); text-transform: lowercase; letter-spacing: .05em; }
@@ -110,152 +102,142 @@
   <main class="wrap">
     <div class="hero">
       <p class="kicker">roadmap snapshot</p>
-      <h1>What we're building, and why it's three layers.</h1>
-      <p class="standfirst">A snapshot of the oauth3 + tee-daemon design as it stands today. One idea, drawn out across a set of RFCs: you should own how much of your own credential you hand out, and a TEE you trust should enforce it.</p>
-      <p class="meta">2026-06-25 · design snapshot, not a spec · most of this is written down, not yet built · detail lives in the RFCs</p>
+      <h1>you decide how much of your account an app gets</h1>
+      <p class="standfirst">Where the oauth3 and tee-daemon design stands on 2026-06-25. Today, letting an app use one of your accounts means handing it the whole login cookie. The work below narrows that, then builds on it.</p>
+      <p class="meta">2026-06-25 · a design snapshot, not a spec · most of it is written down, not built yet · each part links to its RFC</p>
     </div>
 
     <section class="block">
-      <h2>the one idea</h2>
-      <p class="lead">Most of the web has no OAuth. To let an app use your account you hand it your whole cookie — and everything that cookie can do. OAuth1 and OAuth2 let a provider hand out <em>their</em> fixed scopes. <strong>OAuth3 lets <em>you</em> set the dial</strong>, on your own credential, anywhere from a narrow read to the raw thing, with a TEE you control holding the credential and enforcing the setting.</p>
+      <h2>the dial</h2>
+      <p class="lead">To let an app use one of your accounts today, you hand it the whole login cookie, and everything that cookie can do. OAuth1 and OAuth2 only let the provider hand out the scopes the provider defined. oauth3 puts a control between you and the app. The credential stays sealed in a TEE, and the app gets a token scoped to whatever you allow: a single read, one category of data, or the full credential if that is what you want. You set the amount, and the TEE enforces it.</p>
       <figure>
         <div class="dial">
-          <span class="end">narrow scoped read</span>
+          <span class="end">one scoped read</span>
           <span class="pip"></span>
-          <span class="end r">raw credential · zero attenuation</span>
+          <span class="end r">the full credential</span>
         </div>
-        <figcaption>the attenuation dial — you choose the point; the TEE enforces it. that choice is the "3".</figcaption>
+        <figcaption>the credential stays in the TEE. you choose where on this range an app sits.</figcaption>
       </figure>
     </section>
 
     <section class="block">
-      <h2>one primitive, two axes</h2>
-      <p>There is one thing in the system: a <strong>delegation</strong>. Not two kinds ("adapter" that touches the credential vs "app" that consumes output) — those are soft conventions on a continuum. A delegation has two independent axes, and how much friction it takes to approve is a function of both.</p>
+      <h2>what an app does with your data</h2>
+      <p>Before an app is listed, a checker reads its code and writes down what it does, in plain words: reads your full watch history, writes nothing, sends it only to your TinyCloud. The app runs attested, so what it actually does is held to that description and cannot exceed it. How hard the check is depends on how much the app asks for and how far its code can be verified.</p>
       <figure>
         <div class="grid2">
           <div class="hd"></div>
-          <div class="hd">narrow / known scope</div>
-          <div class="hd">broad / raw / zero-attenuation</div>
+          <div class="hd">a narrow, known read</div>
+          <div class="hd">broad or raw access</div>
 
-          <div class="axis">attested<br>in-TEE</div>
-          <div class="cell easy"><span class="tag">one tap</span>verifiable code, narrow ask</div>
-          <div class="cell mid"><span class="tag">appropriate</span>read the measurement — app and adapter blur</div>
+          <div class="axis">attested<br>code</div>
+          <div class="cell easy"><span class="tag">auto</span>approved automatically</div>
+          <div class="cell mid"><span class="tag">fine</span>the code is checkable, so you can see exactly what it does</div>
 
-          <div class="axis">opaque /<br>external</div>
-          <div class="cell easy"><span class="tag">low bar</span>it only gets a narrow read</div>
-          <div class="cell hard"><span class="tag">dev-mode</span>explicit override — a human owns it</div>
+          <div class="axis">code you<br>can't check</div>
+          <div class="cell easy"><span class="tag">auto</span>approved — it only gets a narrow read</div>
+          <div class="cell hard"><span class="tag">manual</span>you override it yourself, on purpose</div>
         </div>
-        <figcaption>friction = f(breadth, 1 / verifiability). the breadth you can request is gated by the verifiability you bring.</figcaption>
+        <figcaption>a broad ask is fine when the code can be checked. a broad ask from code that can't be checked needs you to override it deliberately.</figcaption>
       </figure>
-      <p class="note">Success here isn't "least privilege". It's <strong>legibility</strong>: high power is fine when it's explicit and honest. "Reads all your watch history, and nothing else" is a good grant. The curator's job is to make sure the words an app shows you are ones it can't exceed.</p>
+      <p class="note">The aim is not to keep every app on a short leash. A lot of access is fine when it is stated plainly and you can confirm the statement is true.</p>
     </section>
 
     <section class="block">
-      <h2>authorization is three layers</h2>
-      <div class="layers">
-        <div class="layer"><span class="num">layer 1</span><span><span class="ttl">Listing &amp; curation</span> <span class="sub">— which apps may exist. An agentic curator vets an app once, in a language of capability statements, and earns trust through a cheap→premium verification portfolio.</span></span></div>
-        <div class="layer"><span class="num">layer 2</span><span><span class="ttl">Per-user grant</span> <span class="sub">— a listed app still needs you to approve it onto your own data. <code>connect()</code> → a scoped, revocable token. Listing is not access. (Live today.)</span></span></div>
-        <div class="layer"><span class="num">layer 3</span><span><span class="ttl">Runtime step-up</span> <span class="sub">— even with a valid token, a risky read can pause and ask you out-of-band. The credit-card fraud-check model: the issuer decides, not the app.</span></span></div>
-      </div>
-      <figcaption style="margin-top:10px">each layer is independent; a grant passes all three. only the risky middle ever interrupts you.</figcaption>
+      <h2>reaching your accounts from another device</h2>
+      <p>The extension is the only thing that puts a credential into the pod. Once it is sealed there, any device reads it through a sign-in you have linked — Google, GitHub, or a Matrix homeserver — holding only a token. The credential never copies to the second device. The laptop with the extension is where credentials go in; everything else signs in and reads.</p>
+      <figure>
+        <div class="flow">
+          <div class="step"><span class="s">laptop · extension</span>sign in, and put a site's cookie into the sealed pod.</div>
+          <div class="step"><span class="s">once</span>link a sign-in — Google, GitHub, or Matrix — to the same identity.</div>
+          <div class="step"><span class="s">phone · no extension</span>sign in through it, and reach the same pod.</div>
+          <div class="step"><span class="s">any device</span>an app reads your data with a revocable token.</div>
+        </div>
+        <figcaption>the extension puts credentials in. a linked sign-in reads them from any device.</figcaption>
+      </figure>
     </section>
 
     <section class="block">
-      <h2>one discipline, three feedback loops</h2>
-      <p>Wherever there's a cheap-but-imperfect default and a better-but-expensive path, we keep the default and spend on the expensive path only where it pays — then collect feedback so we need it less over time. The same shape shows up three times, spending three different resources.</p>
+      <h2>using someone else's data without moving it</h2>
+      <p>Other people run their own pods. The same app, identified by its code, runs on yours and theirs. A data room holds members' data under a policy that records which code is allowed to touch it. Admitting a new version of the app, a peer's pod, or a visiting agent is the same operation, and every member can decline it, per record, before their data is included. This builds on Nerla Jean-Louis's work on opting out of TEE app upgrades.</p>
+      <figure>
+        <div class="flow">
+          <div class="step"><span class="s">in place</span>the visiting agent runs inside the host's pod. the data is read where it sits and never leaves.</div>
+          <div class="step"><span class="s">re-encrypted copy</span>with each member's consent, their data is re-encrypted to the other pod. members who declined are left out.</div>
+        </div>
+        <figcaption>two ways to share, both honoring the per-record opt-out.</figcaption>
+      </figure>
+    </section>
+
+    <section class="block">
+      <h2>what gets better as it's used</h2>
+      <p>Three parts of the system get cheaper or more accurate the more they run. Each starts with a cheap default and pays for an expensive path only where it is worth it, then keeps the result so the expensive path is needed less often.</p>
       <figure>
         <div class="loops">
           <div class="loop">
-            <h4>Audit spend</h4>
-            <div class="row"><span class="cheap">LLM judge reads the code</span><span class="arr">→</span><span class="dear">info-flow proof · human "safe"</span></div>
-            <div class="res">allocator: usage · power · declines</div>
-            <div class="res">spends: audit tokens</div>
+            <h4>checking an app</h4>
+            <div class="row"><span class="cheap">a model reads the code</span><span class="arr">→</span><span class="dear">information-flow proof, or human review</span></div>
+            <div class="res">more for apps used a lot, or asking for a lot</div>
           </div>
           <div class="loop">
-            <h4>Adapter reification</h4>
-            <div class="row"><span class="cheap">browser + screenshot</span><span class="arr">→</span><span class="dear">reversed replay-API scope</span></div>
-            <div class="res">allocator: hotness</div>
-            <div class="res">spends: reverse-eng tokens</div>
+            <h4>speeding up a read</h4>
+            <div class="row"><span class="cheap">drive a browser, screenshot it</span><span class="arr">→</span><span class="dear">work out the API call behind it</span></div>
+            <div class="res">more for reads that happen often</div>
           </div>
           <div class="loop">
-            <h4>Runtime step-up</h4>
-            <div class="row"><span class="cheap">auto-approve / reject</span><span class="arr">→</span><span class="dear">bother the user</span></div>
-            <div class="res">allocator: risk · novelty</div>
-            <div class="res">spends: user attention</div>
+            <h4>asking you</h4>
+            <div class="row"><span class="cheap">approve or reject automatically</span><span class="arr">→</span><span class="dear">ask you out-of-band</span></div>
+            <div class="res">more for risky or first-time reads</div>
           </div>
         </div>
-        <figcaption>shrink the costly middle. every loop validates against a ground truth and collects its feedback corpus from day one.</figcaption>
+        <figcaption>each keeps a record of what it decided and how it turned out, and uses it to need the expensive path less.</figcaption>
       </figure>
     </section>
 
     <section class="block">
-      <h2>two layers, two repos</h2>
-      <p>The work splits cleanly. <strong>oauth3</strong> is the application layer — identity, delegation, the curator's language. <strong>tee-daemon</strong> (dstack-webhost) is the platform — the TEE, attestation, the credential broker, the curated-list machinery. The app RFCs consume the platform RFCs; they don't re-implement them.</p>
+      <h2>the pieces</h2>
+      <p>Underneath, the work splits across two repositories. <strong>oauth3-server</strong> is the application layer and deploys as a project onto the platform. <strong>tee-daemon</strong> (dstack-webhost) is the platform: the TEE, attestation, the credential broker, the curated-list machinery. The application RFCs build on the platform ones.</p>
       <figure>
         <div class="stack">
           <div class="band app">
-            <div class="lbl">oauth3-server — application layer (deploys as a project)</div>
+            <div class="lbl">oauth3-server — application layer</div>
             <div class="chips">
-              <span class="chip"><b>0000</b> opportunistic spend</span>
-              <span class="chip"><b>0001</b> adapter reification</span>
-              <span class="chip"><b>0002</b> federated login</span>
-              <span class="chip"><b>0003</b> delegation continuum</span>
-              <span class="chip"><b>0004</b> capability statements</span>
-              <span class="chip"><b>0005</b> runtime step-up</span>
-              <span class="chip"><b>0006</b> ambassadors &amp; data rooms</span>
+              <a class="chip" href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0000-opportunistic-spend.md"><b>0000</b> opportunistic spend</a>
+              <a class="chip" href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0001-adapter-reification-loop.md"><b>0001</b> adapter reification</a>
+              <a class="chip" href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0002-federated-login-providers.md"><b>0002</b> federated login</a>
+              <a class="chip" href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0003-delegation-continuum.md"><b>0003</b> delegation continuum</a>
+              <a class="chip" href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0004-capability-statements.md"><b>0004</b> capability statements</a>
+              <a class="chip" href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0005-runtime-step-up-authorization.md"><b>0005</b> runtime step-up</a>
+              <a class="chip" href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0006-ambassadors-and-data-rooms.md"><b>0006</b> ambassadors &amp; data rooms</a>
             </div>
           </div>
-          <div class="between">▲ consumes — builds on, does not duplicate ▲</div>
+          <div class="between">▲ the application layer builds on the platform layer ▲</div>
           <div class="band plat">
-            <div class="lbl">tee-daemon (dstack-webhost) — platform layer (rebuilds the daemon image)</div>
+            <div class="lbl">tee-daemon (dstack-webhost) — platform layer</div>
             <div class="chips">
-              <span class="chip"><b>0018</b> credential broker</span>
-              <span class="chip"><b>0020</b> attestation evidence</span>
-              <span class="chip"><b>0021</b> evidence spend</span>
-              <span class="chip"><b>0022</b> spec-based appraisal</span>
-              <span class="chip"><b>0024</b> cross-pod federation</span>
+              <a class="chip" href="https://github.com/amiller/dstack-webhost/blob/main/rfcs/0018-credential-broker.md"><b>0018</b> credential broker</a>
+              <a class="chip" href="https://github.com/amiller/dstack-webhost/blob/main/rfcs/0020-attestation-evidence-for-consumers.md"><b>0020</b> attestation evidence</a>
+              <a class="chip" href="https://github.com/amiller/dstack-webhost/blob/main/rfcs/0021-app-self-improvement-evidence-spend.md"><b>0021</b> evidence spend</a>
+              <a class="chip" href="https://github.com/amiller/dstack-webhost/blob/main/rfcs/0022-spec-based-appraisal-curated-list.md"><b>0022</b> spec-based appraisal</a>
+              <a class="chip" href="https://github.com/amiller/dstack-webhost/issues/37"><b>0024</b> cross-pod federation</a>
             </div>
           </div>
         </div>
-        <figcaption>the curator's "verifiability" axis is the daemon's attestation evidence (0020) + appraisal (0022); an oauth3 instance is one named curator. federation rides 0024.</figcaption>
+        <figcaption>an oauth3 instance is one curator on top of the daemon's attestation (0020) and appraisal (0022). federation rides 0024.</figcaption>
       </figure>
-    </section>
-
-    <section class="block">
-      <h2>how it feels — across your devices</h2>
-      <p>The extension is the only thing that can <em>put a cookie in</em>. Once a jar is sealed in the instance, every other device reads it through a linked sign-in, holding only a scoped token.</p>
-      <figure>
-        <div class="flow">
-          <div class="step"><span class="s">laptop · extension</span>sign in with a key you hold; harvest a site's cookie into the sealed vault.</div>
-          <div class="step"><span class="s">once</span>link a door — add a Google / GitHub / Matrix sign-in to the same identity.</div>
-          <div class="step"><span class="s">phone · no extension</span>sign in through that door → the same vault.</div>
-          <div class="step"><span class="s">anywhere</span>an app reads your data with a revocable token. the cookie never leaves the pod.</div>
-        </div>
-        <figcaption>the extension is the cookie faucet; identity is a set of doors onto one room, not a key you have to carry.</figcaption>
-      </figure>
-    </section>
-
-    <section class="block">
-      <h2>and across operators</h2>
-      <p>Other people run their own pods. The same app, by its code measurement, can run on yours and theirs. A <strong>data room</strong> holds members' data under a policy that says which code may touch it; admitting a new version, a peer pod, or a visiting <strong>ambassador</strong> is one governed operation, and any member can opt out of it — a fine-grained "rage quit" of changes they don't accept (generalizing Nerla Jean-Louis's dstack update-opt-out work). An ambassador is just a delegation across operators: the host verifies the visitor's code; the visitor verifies the host's. Data either stays in place and is computed on, or is re-encrypted only to peers a member hasn't opted out of.</p>
-    </section>
-
-    <section class="block">
-      <h2>the rfcs at a glance</h2>
       <table>
-        <thead><tr><th>id</th><th>title</th><th>what it settles</th><th></th></tr></thead>
+        <thead><tr><th>rfc</th><th>title</th><th>what it settles</th><th></th></tr></thead>
         <tbody>
-          <tr><td><span class="id">o3·0000</span></td><td>Opportunistic spend</td><td>the shrink-the-costly-middle discipline all the loops share</td><td><span class="st spec">spec</span></td></tr>
-          <tr><td><span class="id">o3·0001</span></td><td>Adapter reification</td><td>promote a browser read to a cheap replay-API scope, where it's hot</td><td><span class="st spec">spec</span></td></tr>
-          <tr><td><span class="id">o3·0002</span></td><td>Federated login</td><td>sign in with GitHub / Google / Matrix — no app approval; a zero-data delegation</td><td><span class="st spec">spec · next</span></td></tr>
-          <tr><td><span class="id">o3·0003</span></td><td>Delegation continuum</td><td>one primitive, attenuation × verifiability, dev-mode for broad+opaque</td><td><span class="st spec">spec</span></td></tr>
-          <tr><td><span class="id">o3·0004</span></td><td>Capability statements</td><td>the curator's language + the cheap→premium verification portfolio</td><td><span class="st spec">spec</span></td></tr>
-          <tr><td><span class="id">o3·0005</span></td><td>Runtime step-up</td><td>layer-3 authz — the credit-card model, baseline + per-user guards</td><td><span class="st spec">spec</span></td></tr>
-          <tr><td><span class="id">o3·0006</span></td><td>Ambassadors &amp; data rooms</td><td>cross-operator delegation; two modes — in-place &amp; re-encrypted share</td><td><span class="st spec">spec</span></td></tr>
-          <tr><td><span class="id">td·0024</span></td><td>Cross-pod federation</td><td>code-identity admission + mutual attestation (the platform half of o3·0006)</td><td><span class="st spec">spec</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0000-opportunistic-spend.md">o3·0000</a></span></td><td>Opportunistic spend</td><td>the cheap-default / spend-where-it-pays pattern the loops share</td><td><span class="st spec">spec</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0001-adapter-reification-loop.md">o3·0001</a></span></td><td>Adapter reification</td><td>turn a slow browser read into a fast API call, where it's hot</td><td><span class="st spec">spec</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0002-federated-login-providers.md">o3·0002</a></span></td><td>Federated login</td><td>sign in with GitHub, Google, or Matrix — no app approval needed</td><td><span class="st spec">spec · next</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0003-delegation-continuum.md">o3·0003</a></span></td><td>Delegation continuum</td><td>one kind of grant, from a scoped read to the raw credential</td><td><span class="st spec">spec</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0004-capability-statements.md">o3·0004</a></span></td><td>Capability statements</td><td>plain-words claims about an app, and how they're checked</td><td><span class="st spec">spec</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0005-runtime-step-up-authorization.md">o3·0005</a></span></td><td>Runtime step-up</td><td>pause a risky read and ask you, even with a valid token</td><td><span class="st spec">spec</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0006-ambassadors-and-data-rooms.md">o3·0006</a></span></td><td>Ambassadors &amp; data rooms</td><td>run an app over someone else's data, in place or by copy</td><td><span class="st spec">spec</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/amiller/dstack-webhost/issues/37">td·0024</a></span></td><td>Cross-pod federation</td><td>the platform half of 0006 — which code may touch a room's data</td><td><span class="st spec">spec</span></td></tr>
         </tbody>
       </table>
-      <p class="note" style="margin-top:14px">Live today, underneath all of this: the instance on the pod, cookie ingest with no install, the otter / reddit adapters, multi-tenant identity (did:key / passkey), and the full <code>connect → approve → scoped token → revoke</code> grant flow. The RFCs above are where it goes next.</p>
+      <p class="note" style="margin-top:14px">Live today, under all of this: the instance on the pod, cookie ingest with no install, the Otter and Reddit adapters, multi-tenant identity, and the full <code>connect → approve → token → revoke</code> flow. The RFCs are where it goes next.</p>
     </section>
 
     <footer>oauth3 · roadmap snapshot 2026-06-25 · <a href="index.html">home</a> · <a href="https://github.com/teleport-computer/oauth3-server/tree/main/rfcs">rfcs</a> · running on a dstack tee-daemon</footer>
