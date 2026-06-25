@@ -64,7 +64,8 @@
   .loop .cheap, .loop .dear { padding: 5px 8px; border-radius: 6px; font-family: var(--mono); font-size: 11px; line-height: 1.3; flex: 1; }
   .loop .cheap { background: #e7efe7; } .loop .dear { background: #f3ddd2; }
   .loop .arr { font-family: var(--mono); font-size: 11px; color: var(--faint); white-space: nowrap; }
-  .loop .res { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin-top: 10px; line-height: 1.4; }
+  .loop .res { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin-top: 7px; line-height: 1.4; }
+  .loop .res b { color: var(--ink); font-weight: 600; }
   /* two-layer map */
   .stack { display: flex; flex-direction: column; gap: 10px; }
   .band { border: 1px solid var(--rule); border-radius: 12px; padding: 14px 16px; }
@@ -102,8 +103,8 @@
   <main class="wrap">
     <div class="hero">
       <p class="kicker">roadmap snapshot</p>
-      <h1>you decide how much of your account an app gets</h1>
-      <p class="standfirst">Where the oauth3 and tee-daemon design stands on 2026-06-25. Today, letting an app use one of your accounts means handing it the whole login cookie. The work below narrows that, then builds on it.</p>
+      <h1>interoperability, no matter what</h1>
+      <p class="standfirst">No service can lock you out of building on your own account. oauth3 uses what you already have — your cookies, and when it has to, a whole browser running in a TEE — to work with any of them, while the credential never leaves a box you control.</p>
       <p class="meta">2026-06-25 · a design snapshot, not a spec · most of it is written down, not built yet · each part links to its RFC</p>
     </div>
 
@@ -169,27 +170,30 @@
     </section>
 
     <section class="block">
-      <h2>what gets better as it's used</h2>
-      <p>Three parts of the system get cheaper or more accurate the more they run. Each starts with a cheap default and pays for an expensive path only where it is worth it, then keeps the result so the expensive path is needed less often.</p>
+      <h2>spend effort where it pays, and learn</h2>
+      <p>One design idea runs through three parts of the system. Each has a cheap way to decide and a slow, expensive way to decide. It uses the cheap way by default and pays for the expensive one only where it is worth it. Then it records what it decided and what happened, so the cheap way gets better and the expensive one is needed less. The more the system is used, the cheaper and more accurate it gets — it is built to improve as it runs, not to be tuned by hand.</p>
       <figure>
         <div class="loops">
           <div class="loop">
             <h4>checking an app</h4>
-            <div class="row"><span class="cheap">a model reads the code</span><span class="arr">→</span><span class="dear">information-flow proof, or human review</span></div>
-            <div class="res">more for apps used a lot, or asking for a lot</div>
+            <div class="row"><span class="cheap">a model reads the code</span><span class="arr">→</span><span class="dear">a proof, or human review</span></div>
+            <div class="res"><b>more for</b> apps used a lot, or asking for a lot</div>
+            <div class="res"><b>learns</b> which apps turned out fine, so fewer need the proof</div>
           </div>
           <div class="loop">
             <h4>speeding up a read</h4>
-            <div class="row"><span class="cheap">drive a browser, screenshot it</span><span class="arr">→</span><span class="dear">work out the API call behind it</span></div>
-            <div class="res">more for reads that happen often</div>
+            <div class="row"><span class="cheap">drive a browser, screenshot it</span><span class="arr">→</span><span class="dear">the API call behind it</span></div>
+            <div class="res"><b>more for</b> reads that happen often</div>
+            <div class="res"><b>learns</b> by checking the fast call against the browser, and drops it if it drifts</div>
           </div>
           <div class="loop">
             <h4>asking you</h4>
-            <div class="row"><span class="cheap">approve or reject automatically</span><span class="arr">→</span><span class="dear">ask you out-of-band</span></div>
-            <div class="res">more for risky or first-time reads</div>
+            <div class="row"><span class="cheap">approve or reject for you</span><span class="arr">→</span><span class="dear">ask you out-of-band</span></div>
+            <div class="res"><b>more for</b> risky or first-time reads</div>
+            <div class="res"><b>learns</b> your normal pattern, so it asks you less over time</div>
           </div>
         </div>
-        <figcaption>each keeps a record of what it decided and how it turned out, and uses it to need the expensive path less.</figcaption>
+        <figcaption>one design in three places: a cheap default, an expensive path used only where it pays, and a record of outcomes that shrinks the expensive path over time. it is written down once, in RFC 0000.</figcaption>
       </figure>
     </section>
 
