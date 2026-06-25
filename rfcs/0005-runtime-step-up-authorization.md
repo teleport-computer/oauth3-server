@@ -10,6 +10,12 @@ retry." Most invocations auto-approve or auto-reject; the guarded *middle* is th
 thing that interrupts the user, on a channel they own (Matrix-first). Every step-up +
 response is feedback that shrinks the middle — an instance of RFC 0000.
 
+The deeper purpose is **progressive autonomy**: the guard is how an app or agent starts
+cautious and *earns a wider berth as it proves itself*, routed by how reversible an
+action is and who it affects. The thing being tuned is **calibrated autonomy**, not
+accuracy. (This adopts a loop-construction framework from the shape-rotator program —
+see "Relationship".)
+
 ## Problem — why a third layer
 - **Layer 1, listing/curation** (0003/0004, td-0022) gatekeeps *which apps exist*.
 - **Layer 2, grant** (0003 connect→approve) is one-time and coarse: it decides "this app
@@ -67,6 +73,27 @@ step-up is *reauthorize triggered by a risk score and resolved over the channel*
   retry succeeds. Deny/expire → terminal fail, logged.
 - **Idempotency:** a retried read after release must not double-execute. Mostly reads
   here, but this matters the moment write/action capabilities exist.
+
+## Progressive autonomy — the shape over time
+Step-up is not only fraud detection. It is the mechanism by which an app or agent
+**earns autonomy over time**. Route each action by **reversibility × blast radius**:
+
+- reversible, affects only the caller's own scope → **act**, no prompt
+- reversible, but touches your other data or other people → **propose and wait**
+- irreversible, affects non-consenting third parties → **draft only**; you decide
+
+Start conservative and widen the radius as the caller proves itself — and do it **per
+kind of action, not globally** (an app trusted to read is not thereby trusted to post).
+The metric is **calibrated autonomy**, not accuracy: balance *false acts* (acting when it
+should have asked — kills trust) against *false deferrals* (asking when it could have
+acted — kills adoption), and keep tuning that threshold.
+
+Every override — approving what the guard would have blocked, or rejecting what it
+allowed — is a **new evaluation case**. The guard's eval set grows from real overrides and
+is iterated faster than any model; that eval set *is* the RFC 0000 corpus, here. This
+reframes the guard from "interrupt on anomaly" to "graduate trust per judgment type",
+which is the same shape as RFC 0004's discharge ladder for apps — earned trust, not
+granted once.
 
 ## Feedback loop (instance of RFC 0000)
 Each `(invocation, signals, decision, user response, outcome)` is a label. The guard
