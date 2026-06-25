@@ -62,11 +62,11 @@ export const otterPlugin: Plugin = {
   async listItems(jar: Jar): Promise<PluginItem[]> {
     const uid = await userId(jar);
     const seen = new Map<string, any>();
-    // owned + shared in parallel (sequential was ~2x slower and tripped the gateway timeout);
-    // a failing source degrades to empty instead of killing the whole read.
+    // owned + shared in parallel (sequential was ~2x slower and tripped the gateway timeout).
+    // A failing source propagates — no error masking.
     const lists = await Promise.all(
       ["owned", "shared"].map((source) =>
-        getJSON("/speeches", jar, { userid: uid, page_size: "200", source }).catch(() => ({ speeches: [] }))
+        getJSON("/speeches", jar, { userid: uid, page_size: "200", source })
       ),
     );
     for (const res of lists) {
