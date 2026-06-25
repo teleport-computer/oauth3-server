@@ -19,6 +19,7 @@ import { approveConnect, createConnect, denyConnect, getConnect, initConnect, st
 import { audit, auditLog, initAudit } from "./audit.ts";
 import { startScheduler } from "./scheduler.ts";
 import { approvePage } from "./approve-page.ts";
+import { appPage } from "./app-page.ts";
 import { loginPage } from "./login-page.ts";
 import { createSession, destroySession, initSessions, verifySession } from "./sessions.ts";
 import { newChallenge, verifyDidSignIn } from "./identity.ts";
@@ -84,6 +85,11 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   // The acting identity: a web session's subject, or "owner" when the owner secret is
   // presented directly (CLI/extension). null = unauthenticated. Jars + tokens scope to it.
   const subjectOf = (): string | null => session?.subject ?? (isOwner(req) ? "owner" : null);
+
+  // The instance's own demo app — open it with the extension, no sign-in.
+  if (req.method === "GET" && (path === "/app" || path === "/app/")) {
+    return html(appPage());
+  }
 
   // --- web sign-in (so you approve apps without re-pasting the owner secret) ---
   if (req.method === "GET" && path === "/login") {

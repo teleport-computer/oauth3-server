@@ -9,7 +9,8 @@
 
 import { cookieHeader, Jar, Plugin, PluginItem } from "./types.ts";
 
-const BASE = "https://otter.ai/forward/api/v1";
+// Overridable so a demo/e2e can point at a fixture server; defaults to live Otter.
+const BASE = Deno.env.get("OTTER_BASE") || "https://otter.ai/forward/api/v1";
 const UA = "Mozilla/5.0";
 
 function headers(jar: Jar, extra: Record<string, string> = {}): Record<string, string> {
@@ -61,8 +62,14 @@ export const otterPlugin: Plugin = {
   async listItems(jar: Jar): Promise<PluginItem[]> {
     const uid = await userId(jar);
     const seen = new Map<string, any>();
-    for (const source of ["owned", "shared"]) {
-      const res = await getJSON("/speeches", jar, { userid: uid, page_size: "1000", source });
+    // owned + shared in parallel (sequential was ~2x slower and tripped the gateway timeout);
+    // a failing source degrades to empty instead of killing the whole read.
+    const lists = await Promise.all(
+      ["owned", "shared"].map((source) =>
+        getJSON("/speeches", jar, { userid: uid, page_size: "200", source }).catch(() => ({ speeches: [] }))
+      ),
+    );
+    for (const res of lists) {
       for (const sp of res?.speeches ?? []) if (!seen.has(sp.otid)) seen.set(sp.otid, sp);
     }
     return [...seen.values()].map((sp): PluginItem => {
