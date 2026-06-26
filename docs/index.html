@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>oauth3 — read your accounts without surrendering your cookies</title>
-<link rel="icon" type="image/svg+xml" href="icon.svg">
-<link rel="apple-touch-icon" href="icon.svg">
+<link rel="icon" type="image/png" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
 <meta name="description" content="OAuth3 lets apps read your accounts with a scoped, revocable token — never your raw cookies. Your cookies live in a TEE you control; apps read through it. Live demo: Otter Copilot." />
 <meta property="og:title" content="oauth3" />
 <meta property="og:description" content="Apps read your accounts with a scoped, revocable token — never your cookies. Live demo: Otter Copilot, running in a TEE." />
@@ -85,8 +85,8 @@
 </head>
 <body>
   <header class="top">
-    <span class="brand"><img src="icon.svg" alt="" width="22" height="22" style="vertical-align:-5px;margin-right:7px">oauth3</span>
-    <a href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/oauth3/login">sign in ↗</a>
+    <span class="brand"><img src="icon.png" alt="" width="22" height="22" style="vertical-align:-5px;margin-right:7px">oauth3</span>
+    <a href="https://dstack-pod.soc1024.com/oauth3/login">sign in ↗</a>
   </header>
 
   <main class="wrap">
@@ -99,26 +99,26 @@
     <section class="block">
       <h2>try it — live</h2>
       <div class="cards">
-        <a class="card" href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/otterscope/">
+        <a class="card" href="https://dstack-pod.soc1024.com/otterscope/">
           <div class="lbl">example app · live</div>
           <div class="name">Otter via OAuth3</div>
           <div class="desc">Click <em>Connect Otter</em>; your OAuth3 extension approves it and hands it a scoped token. It then lists and reads your Otter conversations through the instance — <strong>never your cookie</strong>.</div>
           <div class="go">open the app →</div>
         </a>
-        <a class="card" href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/feedling-web/">
+        <a class="card" href="https://dstack-pod.soc1024.com/feedling-web/">
           <div class="lbl">example app · live</div>
           <div class="name">Doomscroll notifier</div>
           <div class="desc">Tracks your YouTube shorts and nudges you when you&rsquo;ve been scrolling too long.</div>
           <div class="go">open the app →</div>
         </a>
-        <a class="card" href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/oauth3/login">
+        <a class="card" href="https://dstack-pod.soc1024.com/oauth3/login">
           <div class="lbl">your account</div>
           <div class="name">Sign in</div>
           <div class="desc">Sign in to the instance with a key only you hold (did:key) and manage which apps may read which accounts. Needs the <a href="https://github.com/teleport-computer/oauth3-extension">extension</a>.</div>
           <div class="go">sign in →</div>
         </a>
       </div>
-      <p class="podnote">The instance runs on <strong>Andrew&rsquo;s personal TEE pod</strong> — a <a href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/">dstack tee-daemon</a> at <code>915c8197…dstack-pha-prod7.phala.network</code>. That pod <em>is</em> the oauth3 instance: the sealed room your cookies live in; apps read through it with a scoped token.</p>
+      <p class="podnote">The instance runs on <strong>Andrew&rsquo;s personal TEE pod</strong> — a <a href="https://dstack-pod.soc1024.com/">dstack tee-daemon</a> at <code>dstack-pod.soc1024.com</code>. That pod <em>is</em> the oauth3 instance: the sealed room your cookies live in; apps read through it with a scoped token.</p>
     </section>
 
     <section class="block">
@@ -168,7 +168,7 @@ oauth3 read  otter            <span class="c"># real data, no cookie</span></pre
 
     <section class="block">
       <h2>why trust it</h2>
-      <p>The instance runs inside a TEE — a sealed room the operator can&rsquo;t see into. The host is the <a href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/">tee-daemon</a>, which attests the exact code each app runs; an app (or the extension) can <strong>pin that measurement</strong> before trusting an instance — you trust the code, not the operator. A teleport experiment, with TinyCloud.</p>
+      <p>The instance runs inside a TEE — a sealed room the operator can&rsquo;t see into. The host is the <a href="https://dstack-pod.soc1024.com/">tee-daemon</a>, which attests the exact code each app runs; an app (or the extension) can <strong>pin that measurement</strong> before trusting an instance — you trust the code, not the operator. A teleport experiment, with TinyCloud.</p>
     </section>
 
     <section class="block">
