@@ -18,6 +18,7 @@ import { deleteJar, getJar, initVault, jarStatus, setJar } from "./vault.ts";
 import { initTokens, listTokens, mint, revoke, verify } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit } from "./audit.ts";
+import { formatAuditDecision, gate, Scope, STATIC_LISTING } from "./listing.ts";
 import { startScheduler } from "./scheduler.ts";
 import { approvePage } from "./approve-page.ts";
 import { appPage } from "./app-page.ts";
@@ -195,10 +196,38 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return json({ audit: auditLog() });
   }
 
+  // Layer-1 listing catalog (read-only; no auth needed for discoverability).
+  if (req.method === "GET" && path === "/api/listing") {
+    return json({ listing: STATIC_LISTING });
+  }
+
   // --- connect / approval ---
   if (req.method === "POST" && path === "/api/connect") {
     const body = await req.json().catch(() => null) as any;
     if (!getPlugin(body?.plugin)) return json({ error: "unknown plugin" }, 404);
+
+    // Layer-1 listing gate (AC1, AC3, AC4): refuse unlisted, dev-mode for scope overflow.
+    const appId = body?.app || "unknown";
+    const requestedScope: Scope = body?.scope === "raw" ? "raw" : "read";
+    const gateDecision = gate(appId, body.plugin, requestedScope);
+
+    if (gateDecision.decision === "refuse") {
+      await audit("connect.refuse", formatAuditDecision(appId, body.plugin, requestedScope, gateDecision));
+      return json({ error: gateDecision.reason, mode: "refuse" }, 403);
+    }
+
+    if (gateDecision.decision === "devmode") {
+      await audit("connect.devmode", formatAuditDecision(appId, body.plugin, requestedScope, gateDecision));
+      // Dev-mode: explicit affordance, not silent (AC3, AC4). The response carries the reason
+      // and a mode marker; the client must present an explicit dev-mode affordance to proceed.
+      return json({
+        error: gateDecision.reason,
+        mode: "dev",
+        note: "This request exceeds the app's listed scope. Use dev-mode to proceed (requires explicit owner approval).",
+      }, 403);
+    }
+
+    // Allowed: proceed to existing createConnect (layer-2 grant unchanged).
     const r = await createConnect(body.plugin, body.subject, body.app);
     await audit("connect.request", { plugin: r.plugin, app: r.app, requestId: r.requestId });
     return json({ requestId: r.requestId, approveUrl: `${origin}/approve/${r.requestId}` });
