@@ -262,7 +262,11 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     try {
-      const data = m[2] ? await plugin.fetchItem(jar, decodeURIComponent(m[2])) : await plugin.listItems(jar);
+      const listOpts = {
+        page: url.searchParams.get("page") ? Number(url.searchParams.get("page")) : undefined,
+        pageSize: url.searchParams.get("page_size") ? Number(url.searchParams.get("page_size")) : undefined,
+      };
+      const data = m[2] ? await plugin.fetchItem(jar, decodeURIComponent(m[2])) : await plugin.listItems(jar, listOpts);
       await audit("read", { plugin: plugin.id, item: m[2] || "list", by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, data });
     } catch (e) {

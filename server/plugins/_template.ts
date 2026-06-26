@@ -16,7 +16,7 @@
 //   deno run -A cli.ts sync <id> --cookie 'NYT-S=..,...' --owner $SECRET
 //   deno run -A cli.ts read <id>                          --token  $SCOPED
 
-import { cookieHeader, Jar, Plugin, PluginItem } from "./types.ts";
+import { cookieHeader, Jar, Plugin, PluginItem, PluginListOptions } from "./types.ts";
 
 const BASE = "https://EXAMPLE.com/api"; // TODO: real base
 const UA = "Mozilla/5.0";
@@ -34,7 +34,7 @@ export const templatePlugin: Plugin = {
     return !!jar["SESSION_COOKIE"]; // TODO: a key cookie that means "logged in"
   },
 
-  async listItems(jar: Jar): Promise<PluginItem[]> {
+  async listItems(jar: Jar, _opts?: PluginListOptions): Promise<PluginItem[]> {
     // TODO: call the list endpoint, map each row to {id, title, date?, meta?}.
     const r = await fetch(`${BASE}/items`, { headers: headers(jar), signal: AbortSignal.timeout(60_000) });
     if (r.status === 401 || r.status === 403) throw new Error("site rejected the jar — cookies expired");
