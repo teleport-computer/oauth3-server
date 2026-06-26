@@ -7,7 +7,7 @@
 // Reddit keys on a browser-like User-Agent; the whole .reddit.com jar is synced.
 // (v1 lists the first page, limit=100; pagination via `after` is a TODO.)
 
-import { cookieHeader, Jar, Plugin, PluginItem } from "./types.ts";
+import { cookieHeader, Jar, Plugin, PluginItem, PluginListOptions } from "./types.ts";
 
 const BASE = "https://www.reddit.com";
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -40,7 +40,7 @@ export const redditPlugin: Plugin = {
     return !!jar["reddit_session"];
   },
 
-  async listItems(jar: Jar): Promise<PluginItem[]> {
+  async listItems(jar: Jar, _opts?: PluginListOptions): Promise<PluginItem[]> {
     const name = await username(jar);
     const j = await getJSON(`/user/${encodeURIComponent(name)}/saved.json?limit=100&raw_json=1`, jar);
     return (j?.data?.children ?? []).map((c: any): PluginItem => {

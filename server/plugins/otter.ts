@@ -7,7 +7,7 @@
 //   /bulk_export (POST, x-csrftoken) -> txt (or a zip to unwrap) — works owned AND shared
 // We hold the whole otter.ai jar; reads are gated by a scoped token. Errors propagate.
 
-import { cookieHeader, Jar, Plugin, PluginItem } from "./types.ts";
+import { cookieHeader, Jar, Plugin, PluginItem, PluginListOptions } from "./types.ts";
 
 // Overridable so a demo/e2e can point at a fixture server; defaults to live Otter.
 const BASE = Deno.env.get("OTTER_BASE") || "https://otter.ai/forward/api/v1";
@@ -59,16 +59,18 @@ export const otterPlugin: Plugin = {
     return !!(jar["csrftoken"] && jar["sessionid"]);
   },
 
-  async listItems(jar: Jar): Promise<PluginItem[]> {
+  async listItems(jar: Jar, opts?: PluginListOptions): Promise<PluginItem[]> {
     const uid = await userId(jar);
     const seen = new Map<string, any>();
+    const page = opts?.page || 1;
+    const pageSize = opts?.pageSize || 20;
     // owned + shared in parallel (sequential was ~2x slower and tripped the gateway timeout).
     // A failing source propagates — no error masking.
-    // Cap the default page so the read stays fast (the big page tripped the gateway
-    // timeout). Most-recent first; the consumer pages further on its own.
+    // The caller controls the page size; default 20 keeps the read fast (the big page
+    // tripped the gateway timeout). Most-recent first.
     const lists = await Promise.all(
       ["owned", "shared"].map((source) =>
-        getJSON("/speeches", jar, { userid: uid, page_size: "20", source })
+        getJSON("/speeches", jar, { userid: uid, page: String(page), page_size: String(pageSize), source })
       ),
     );
     for (const res of lists) {
