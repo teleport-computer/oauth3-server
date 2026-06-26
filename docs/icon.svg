@@ -1,13 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <!-- FULL-BLEED disc: a circular mask of any radius just trims black-on-black -->
   <circle cx="64" cy="64" r="64" fill="#111111"/>
-  <!-- rings + content kept inside the safe zone -->
   <circle cx="64" cy="64" r="54" fill="none" stroke="#ffffff" stroke-width="3"/>
   <circle cx="64" cy="64" r="48.5" fill="none" stroke="#ffffff" stroke-width="1.6"/>
-  <text x="64" y="66" text-anchor="middle" dominant-baseline="central"
-        font-family="system-ui, 'DejaVu Sans', sans-serif" font-weight="800" font-size="46" fill="#ffffff">&#8704;</text>
-  <!-- green 3 INSIDE the disc (lower-right), within the safe zone so masks never clip it -->
-  <circle cx="85" cy="87" r="11" fill="#ffffff"/>
-  <text x="85" y="88" text-anchor="middle" dominant-baseline="central"
-        font-family="Georgia, serif" font-weight="800" font-size="16" fill="#2f8f3e">3</text>
+  <text x="60" y="62" text-anchor="middle" dominant-baseline="central"
+        font-family="system-ui, 'DejaVu Sans', sans-serif" font-weight="800" font-size="44" fill="#ffffff">&#8704;</text>
+  <text x="88" y="87" text-anchor="middle" dominant-baseline="central"
+        font-family="Georgia, serif" font-weight="800" font-size="38" fill="#34c759">3</text>
 </svg>
