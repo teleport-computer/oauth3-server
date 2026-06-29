@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>oauth3 — read your accounts without surrendering your cookies</title>
+<title>oauth3 — deploy apps your users can verify</title>
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="apple-touch-icon" href="icon.png">
-<meta name="description" content="OAuth3 lets apps read your accounts with a scoped, revocable token — never your raw cookies. Your cookies live in a TEE you control; apps read through it. Live demo: Otter Copilot." />
+<meta name="description" content="Deploy an app to a TEE pod that proves to everyone who opens it that it does exactly what you say. People delegate any account to the apps they choose, scoped and revocable. Live demo: Otter Copilot." />
 <meta property="og:title" content="oauth3" />
-<meta property="og:description" content="Apps read your accounts with a scoped, revocable token — never your cookies. Live demo: Otter Copilot, running in a TEE." />
+<meta property="og:description" content="Deploy an app to a TEE pod that proves to everyone who opens it that it does what you say. People delegate any account, scoped and revocable. Live demo: Otter Copilot." />
 <meta property="og:type" content="website" />
 <style>
   :root {
@@ -34,8 +34,20 @@
   .hero { padding: 7vh 0 0; }
   h1 { font-weight: 400; font-size: clamp(52px, 11vw, 104px); line-height: .9;
     letter-spacing: -.02em; margin: 0; text-transform: lowercase; }
-  .tagline { font-size: clamp(20px, 3vw, 27px); line-height: 1.25; margin: 22px 0 0; max-width: 18em; }
+  .tagline { font-size: clamp(20px, 3vw, 27px); line-height: 1.25; margin: 18px 0 0; max-width: 18em; }
   .tagline b { font-weight: 600; }
+
+  /* audience toggle — pure CSS, no JS */
+  .vtoggle { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
+  .viewpills { display: inline-flex; gap: 4px; margin: 24px 0 2px; padding: 4px;
+    border: 1px solid var(--rule); border-radius: 999px; }
+  .viewpills label { font-family: var(--mono); font-size: 12px; letter-spacing: .06em;
+    text-transform: lowercase; padding: 6px 15px; border-radius: 999px; cursor: pointer; color: var(--faint); }
+  .view { display: none; }
+  #view-dev:checked ~ .wrap .view-dev,
+  #view-user:checked ~ .wrap .view-user { display: block; }
+  #view-dev:checked ~ .wrap .viewpills label[for="view-dev"],
+  #view-user:checked ~ .wrap .viewpills label[for="view-user"] { background: var(--ink); color: var(--paper); }
 
   section.block { padding: 52px 0 0; }
   h2 { font-family: var(--mono); font-weight: 500; font-size: 12px; letter-spacing: .18em;
@@ -84,6 +96,8 @@
 </style>
 </head>
 <body>
+  <input type="radio" name="aud" id="view-dev" class="vtoggle" checked>
+  <input type="radio" name="aud" id="view-user" class="vtoggle">
   <header class="top">
     <span class="brand"><img src="icon.png" alt="" width="22" height="22" style="vertical-align:-5px;margin-right:7px">oauth3</span>
     <a href="https://dstack-pod.soc1024.com/oauth3/login">sign in ↗</a>
@@ -92,7 +106,16 @@
   <main class="wrap">
     <section class="hero">
       <h1>oauth3</h1>
-      <p class="tagline">Let apps read your accounts with a <b>scoped, revocable token</b> &mdash; never your cookies.</p>
+      <div class="viewpills">
+        <label for="view-dev">for developers</label>
+        <label for="view-user">for users</label>
+      </div>
+      <div class="view view-dev">
+        <p class="tagline">Deploy an app that <b>proves to everyone who opens it</b> that it does exactly what you say.</p>
+      </div>
+      <div class="view view-user">
+        <p class="tagline">Hand any account you have to the <b>apps and agents you choose</b> &mdash; as much or as little as you want.</p>
+      </div>
     </section>
 
     <!-- LIVE first: the actual demo on Andrew's pod -->
@@ -123,7 +146,12 @@
 
     <section class="block">
       <h2>what it is</h2>
-      <p>Most of the web has no OAuth. To let an app use your account, you hand it your whole cookie jar — and everything that jar can do. oauth3 keeps the jar <strong>sealed in a TEE you control</strong> and hands each app only a <strong>narrow, revocable token</strong>: it can read what you approved, nothing more, and you can cut it off any time.</p>
+      <div class="view view-dev">
+        <p>You build an app that reads people&rsquo;s accounts &mdash; watch history, meeting notes, whatever &mdash; push it to your pod and share the link, same as Vercel. The difference: it runs in an <strong>attested enclave</strong>. Where this is headed: anyone who opens the link can verify the running code is exactly what you published, and that it touches only the accounts and scopes you declared. You ask for access in plain words &mdash; <em>&ldquo;reads your watch history, nothing else&rdquo;</em> &mdash; and the deployment backs the claim. People say yes because your app is <strong>legible</strong>, not because they trust you. And you never hold their credential: it stays sealed in their instance, and your app reads through a scoped token. <a href="roadmap-2026-06-25.html" style="border-bottom:1px solid var(--accent);text-decoration:none">where the proof story is going &rarr;</a></p>
+      </div>
+      <div class="view view-user">
+        <p>A handful of sites offer OAuth. Everywhere else, letting an app &mdash; or an AI agent &mdash; use your account is all-or-nothing: you hand over your password, or your whole cookie jar. oauth3 turns any account you can log into into one you can <strong>delegate</strong>: pick what an app gets &mdash; a single read, or the run of the account &mdash; and change your mind whenever. The delegation layer the rest of the web never had.</p>
+      </div>
     </section>
 
     <section class="block">
