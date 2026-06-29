@@ -22,8 +22,15 @@ import { startScheduler } from "./scheduler.ts";
 import { approvePage } from "./approve-page.ts";
 import { appPage } from "./app-page.ts";
 import { loginPage } from "./login-page.ts";
+import { dashboardPage } from "./dashboard-page.ts";
+import { evidencePage, homePage, privacyPage, termsPage } from "./home-page.ts";
 import { createSession, destroySession, initSessions, verifySession } from "./sessions.ts";
 import { newChallenge, verifyDidSignIn } from "./identity.ts";
+import { allCredentialIds, credentialsFor, initPasskeys, passkeyChallenge, verifyAuthentication, verifyRegistration } from "./passkey.ts";
+import { consumeState, enabledProviders, githubAuthUrl, githubEnv, githubExchange, googleAuthUrl, googleEnv, googleExchange, newState } from "./oidc.ts";
+import { configureOtter } from "./plugins/otter.ts";
+import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.ts";
+import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot } from "./browser.ts";
 
 let ready = false;
@@ -40,6 +47,9 @@ async function init(env: Record<string, string>, dataDir: string) {
   await initConnect(dataDir);
   await initAudit(dataDir);
   await initSessions(dataDir);
+  await initPasskeys(dataDir);
+  await initLinks(dataDir);
+  configureOtter(env);
   ownerSecret = env.OWNER_SECRET || env.OAUTH3_OWNER_SECRET || env.EXT_SHARED_SECRET || "";
   publicUrl = (env.PUBLIC_URL || "").replace(/\/$/, "");
   browserSpiUrl = (env.BROWSER_SPI_URL || "").replace(/\/$/, "");
@@ -57,6 +67,12 @@ function json(obj: unknown, status = 200): Response {
 }
 function html(body: string): Response {
   return new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+}
+// After an OAuth redirect callback, hand the SPA its session via localStorage (the app
+// uses localStorage, not cookies) and bounce to the return url. `note` is a static string.
+function landingHtml(session: string | null, returnUrl: string, note: string): string {
+  const set = session ? `localStorage.setItem('oauth3_session', ${JSON.stringify(session)});` : "";
+  return `<!doctype html><meta charset=utf-8><body style="font:15px system-ui;max-width:30rem;margin:3rem auto;color:#111"><p>${note} Redirecting…</p><script>${set}location.href=${JSON.stringify(returnUrl)};</script>`;
 }
 const isOwner = (req: Request) => !!ownerSecret && req.headers.get("Authorization") === `Bearer ${ownerSecret}`;
 
@@ -90,9 +106,23 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   // presented directly (CLI/extension). null = unauthenticated. Jars + tokens scope to it.
   const subjectOf = (): string | null => session?.subject ?? (isOwner(req) ? "owner" : null);
 
+  // Public face: index + privacy + terms (needed to be a real public service; federated
+  // login providers require a reachable home page + privacy policy + ToS). See issue #32.
+  if (req.method === "GET" && (path === "/" || path === "")) return html(homePage(ctx.env));
+  if (req.method === "GET" && path === "/privacy") return html(privacyPage(ctx.env));
+  if (req.method === "GET" && path === "/terms") return html(termsPage(ctx.env));
+  if (req.method === "GET" && path === "/evidence") return html(evidencePage(ctx.env));
+
   // The instance's own demo app — open it with the extension, no sign-in.
+  // ?plugin=<id> picks which adapter to demo (default otter).
   if (req.method === "GET" && (path === "/app" || path === "/app/")) {
-    return html(appPage());
+    return html(appPage(url.searchParams.get("plugin") || "otter"));
+  }
+
+  // Your account dashboard — visit plugin-free; signs in via /login, then shows
+  // connected apps, synced sites, and activity scoped to your subject.
+  if (req.method === "GET" && (path === "/dashboard" || path === "/dashboard/")) {
+    return html(dashboardPage());
   }
 
   // --- web sign-in (so you approve apps without re-pasting the owner secret) ---
@@ -127,8 +157,173 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     await destroySession(authBearer);
     return json({ ok: true });
   }
+
+  // --- passkey (WebAuthn): enroll a passkey while signed in, then sign in with it on
+  // any device. rpId/origin are derived from PUBLIC_URL so it works behind the proxy. ---
+  if (path.startsWith("/api/passkey")) {
+    const pubOrigin = publicUrl ? new URL(publicUrl).origin : url.origin;
+    const origins = [pubOrigin], rpId = new URL(pubOrigin).hostname;
+    if (req.method === "POST" && path === "/api/passkey/register/options") {
+      const subj = subjectOf();
+      if (!subj) return json({ error: "sign in first to add a passkey" }, 401);
+      return json({ challenge: passkeyChallenge(), rpId, userId: subj });
+    }
+    if (req.method === "POST" && path === "/api/passkey/register") {
+      const subj = subjectOf();
+      if (!subj) return json({ error: "sign in first" }, 401);
+      const body = await req.json().catch(() => null) as any;
+      try { await audit("passkey.register", { subject: subj }); return json(await verifyRegistration(body, origins, subj)); }
+      catch (e) { return json({ error: (e as Error).message }, 400); }
+    }
+    if (req.method === "POST" && path === "/api/passkey/login/options") {
+      return json({ challenge: passkeyChallenge(), rpId, allowCredentials: allCredentialIds() });
+    }
+    if (req.method === "POST" && path === "/api/passkey/login") {
+      const body = await req.json().catch(() => null) as any;
+      try {
+        const { subject } = await verifyAuthentication(body, origins);
+        const token = await createSession(subject);
+        await audit("passkey.login", { subject });
+        return json({ ok: true, subject, session: token });
+      } catch (e) { return json({ error: (e as Error).message }, 401); }
+    }
+    if (req.method === "GET" && path === "/api/passkeys") {
+      const subj = subjectOf();
+      if (!subj) return json({ error: "unauthorized" }, 401);
+      return json({ passkeys: credentialsFor(subj) });
+    }
+  }
   if (req.method === "GET" && path === "/api/me") {
-    return json({ signedIn: !!session, subject: session?.subject });
+    return json({ signedIn: !!session, subject: session?.subject, providers: enabledProviders(ctx.env), links: session ? linksFor(session.subject) : [] });
+  }
+  // Unlink a linked sign-in. Lockout-safe: root subjects (userKey/did:key/owner) keep their
+  // localStorage/secret door so unlinking an alias is fine; a federated-rooted subject must
+  // keep at least one factor (links + passkeys).
+  if (req.method === "POST" && path === "/api/links/unlink") {
+    const subj = subjectOf();
+    if (!subj) return json({ error: "unauthorized" }, 401);
+    const body = await req.json().catch(() => null) as { providerId?: string } | null;
+    const pid = body?.providerId || "";
+    if (linkResolve(pid) !== subj) return json({ error: "not your link" }, 404);
+    const hasRoot = subj.startsWith("u-") || subj.startsWith("did:key:") || subj === "owner";
+    const remaining = linksFor(subj).filter((p) => p !== pid).length + credentialsFor(subj).length;
+    if (!hasRoot && remaining === 0) return json({ error: "can't unlink your only sign-in method" }, 409);
+    await linkUnbind(pid);
+    await audit("links.unlink", { subject: subj, providerId: pid });
+    return json({ ok: true });
+  }
+
+  // --- federated login: GitHub OAuth (RFC 0002) + account linking. A provider's routes
+  // exist iff its creds are present (else 404 + the login page omits the button). ---
+  if (path === "/api/login/providers" && req.method === "GET") {
+    return json(enabledProviders(ctx.env));
+  }
+  if (path.startsWith("/api/login/github")) {
+    const gh = githubEnv(ctx.env);
+    if (!gh) return json({ error: "github login not configured" }, 404);
+    const base = publicUrl || origin;
+    const redirectUri = `${base}/api/login/github/callback`;
+    const dash = `${base}/dashboard`;
+    if (req.method === "GET" && path === "/api/login/github") {
+      const rp = url.searchParams.get("return");
+      const ret = rp && rp.startsWith(base) ? rp : dash;               // open-redirect guard
+      // Return the URL for the client to navigate — the daemon ingress FOLLOWS server-side
+      // 3xx (would proxy GitHub's page back as 200) instead of handing it to the browser.
+      return json({ url: githubAuthUrl(gh, newState(ret), redirectUri) });
+    }
+    if (req.method === "POST" && path === "/api/login/github/link") {
+      const subj = subjectOf();
+      if (!subj) return json({ error: "sign in first to link" }, 401);
+      return json({ url: githubAuthUrl(gh, newState(dash, subj), redirectUri) });
+    }
+    if (req.method === "GET" && path === "/api/login/github/callback") {
+      const st = consumeState(url.searchParams.get("state") || "");
+      const code = url.searchParams.get("code") || "";
+      if (!st || !code) return html(landingHtml(null, dash, "GitHub sign-in failed (bad state or code)."));
+      try {
+        const { id } = await githubExchange(gh, code, redirectUri);
+        const providerId = `gh:${id}`;
+        if (st.linkSubject) {                                          // linking, not login
+          await linkBind(providerId, st.linkSubject);
+          await audit("login.github.link", { subject: st.linkSubject, providerId });
+          return html(landingHtml(null, st.ret, "Linked GitHub to your account."));
+        }
+        const subject = linkResolve(providerId) || providerId;        // take-over if linked
+        const session = await createSession(subject);
+        await audit("login.github", { subject });
+        return html(landingHtml(session, st.ret, "Signed in with GitHub."));
+      } catch (e) {
+        return html(landingHtml(null, dash, `GitHub sign-in error: ${(e as Error).message}.`));
+      }
+    }
+  }
+
+  // --- Google login (OIDC). Same shape as GitHub; subject = google:<sub>. Client-driven. ---
+  if (path.startsWith("/api/login/google")) {
+    const g = googleEnv(ctx.env);
+    if (!g) return json({ error: "google login not configured" }, 404);
+    const base = publicUrl || origin;
+    const redirectUri = `${base}/api/login/google/callback`;
+    const dash = `${base}/dashboard`;
+    if (req.method === "GET" && path === "/api/login/google") {
+      const rp = url.searchParams.get("return");
+      const ret = rp && rp.startsWith(base) ? rp : dash;
+      return json({ url: googleAuthUrl(g, newState(ret), redirectUri) });
+    }
+    if (req.method === "POST" && path === "/api/login/google/link") {
+      const subj = subjectOf();
+      if (!subj) return json({ error: "sign in first to link" }, 401);
+      return json({ url: googleAuthUrl(g, newState(dash, subj), redirectUri) });
+    }
+    if (req.method === "GET" && path === "/api/login/google/callback") {
+      const st = consumeState(url.searchParams.get("state") || "");
+      const code = url.searchParams.get("code") || "";
+      if (!st || !code) return html(landingHtml(null, dash, "Google sign-in failed (bad state or code)."));
+      try {
+        const { sub } = await googleExchange(g, code, redirectUri);
+        const providerId = `google:${sub}`;
+        if (st.linkSubject) {
+          await linkBind(providerId, st.linkSubject);
+          await audit("login.google.link", { subject: st.linkSubject, providerId });
+          return html(landingHtml(null, st.ret, "Linked Google to your account."));
+        }
+        const subject = linkResolve(providerId) || providerId;
+        const session = await createSession(subject);
+        await audit("login.google", { subject });
+        return html(landingHtml(session, st.ret, "Signed in with Google."));
+      } catch (e) {
+        return html(landingHtml(null, dash, `Google sign-in error: ${(e as Error).message}.`));
+      }
+    }
+  }
+
+  // --- OpenKey login: SIWE -> did:pkh. Client-driven (the OpenKey wallet signs a SIWE
+  // message), so it POSTs {message, signature} here — no server redirect. ---
+  if (path.startsWith("/api/login/openkey")) {
+    const host = new URL(publicUrl || origin).host;
+    if (req.method === "GET" && path === "/api/login/openkey/nonce") {
+      return json({ nonce: newState(""), domain: host, uri: publicUrl || origin });
+    }
+    if (req.method === "POST" && (path === "/api/login/openkey" || path === "/api/login/openkey/link")) {
+      const body = await req.json().catch(() => null) as { message?: string; signature?: string } | null;
+      if (!body?.message || !body?.signature) return json({ error: "message + signature required" }, 400);
+      let v: { address: string; nonce: string; domain: string };
+      try { v = verifySiwe(body.message, body.signature); } catch (e) { return json({ error: (e as Error).message }, 401); }
+      if (!consumeState(v.nonce)) return json({ error: "unknown or expired nonce" }, 401);
+      if (v.domain && v.domain !== host) return json({ error: `domain mismatch: ${v.domain}` }, 401);
+      const providerId = `did:pkh:eip155:1:${v.address}`;
+      if (path.endsWith("/link")) {
+        const subj = subjectOf();
+        if (!subj) return json({ error: "sign in first to link" }, 401);
+        await linkBind(providerId, subj);
+        await audit("login.openkey.link", { subject: subj, providerId });
+        return json({ ok: true, linked: providerId });
+      }
+      const subject = linkResolve(providerId) || providerId;
+      const session = await createSession(subject);
+      await audit("login.openkey", { subject });
+      return json({ ok: true, subject, session });
+    }
   }
 
   if (req.method === "GET" && path === "/api/health") {
@@ -179,8 +374,10 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return json({ token: t.token, plugin: t.plugin, subject: t.subject });
   }
   if (req.method === "GET" && path === "/api/tokens") {
-    if (!isOwner(req) && !session) return json({ error: "unauthorized" }, 401);
-    return json({ tokens: listTokens() });
+    const subj = subjectOf();
+    if (!subj) return json({ error: "unauthorized" }, 401);
+    const all = listTokens();
+    return json({ tokens: subj === "owner" ? all : all.filter((t) => t.subject === subj) });
   }
   const tok = path.match(/^\/api\/tokens\/(.+)$/);
   if (req.method === "DELETE" && tok) {
@@ -191,8 +388,10 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   }
 
   if (req.method === "GET" && path === "/api/audit") {
-    if (!isOwner(req) && !session) return json({ error: "unauthorized" }, 401);
-    return json({ audit: auditLog() });
+    const subj = subjectOf();
+    if (!subj) return json({ error: "unauthorized" }, 401);
+    const all = auditLog();
+    return json({ audit: subj === "owner" ? all : all.filter((e) => (e.detail as { subject?: string } | undefined)?.subject === subj) });
   }
 
   // --- connect / approval ---

@@ -1,13 +1,23 @@
-// The instance serves its own demo app at GET /app. Open it in any browser that
-// has the oauth3 extension — no account, no sign-in: the extension is your identity.
-// The page talks to whatever instance served it (derived from its own URL), so it
-// works unchanged on a local node or a real pod under any mount prefix.
-export function appPage(): string {
+// The instance serves its own demo app at GET /app?plugin=<id>. Open it in any
+// browser that has the oauth3 extension — no account, no sign-in: the extension is
+// your identity. The page talks to whatever instance served it (derived from its own
+// URL), so it works unchanged on a local node or a real pod under any mount prefix.
+
+// Per-plugin display config. Unknown plugins fall back to a generic copy so a new
+// adapter is demoable the moment it lands, without editing this file.
+const APPS: Record<string, { title: string; noun: string; domain: string }> = {
+  otter: { title: "Otter recaps", noun: "conversations", domain: "otter.ai" },
+  reddit: { title: "Reddit saved", noun: "saved posts", domain: "reddit.com" },
+};
+
+export function appPage(pluginId = "otter"): string {
+  const plugin = pluginId.replace(/[^a-z0-9-]/g, "") || "otter";
+  const cfg = APPS[plugin] ?? { title: plugin, noun: "items", domain: plugin };
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8" />
-<title>Otter — log in with your browser</title>
+<title>${cfg.title} — log in with your browser</title>
 <style>
   body { font: 15px/1.5 system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #111; }
   h1 { font-size: 22px; margin: 0 0 4px; }
@@ -24,7 +34,7 @@ export function appPage(): string {
 </style>
 </head>
 <body>
-  <h1>Otter recaps</h1>
+  <h1>${cfg.title}</h1>
   <p class="sub">No account, no password. Your browser is your identity — just the <b>oauth3 extension</b>. Works in incognito.</p>
 
   <button id="login">Log in with my browser</button>
@@ -33,6 +43,9 @@ export function appPage(): string {
   <div id="result"></div>
 
 <script>
+const PLUGIN = ${JSON.stringify(plugin)};
+const NOUN = ${JSON.stringify(cfg.noun)};
+const DOMAIN = ${JSON.stringify(cfg.domain)};
 // The instance that served this page IS the instance to read from (mount-aware),
 // overridable with ?node= for testing.
 const NODE = new URLSearchParams(location.search).get("node")
@@ -41,7 +54,7 @@ const $ = (id) => document.getElementById(id);
 const out = $("result");
 
 function showErr(status, body) {
-  const hint = status === 409 ? " — sign into otter.ai in this browser, then log in again." : "";
+  const hint = status === 409 ? " — sign into " + DOMAIN + " in this browser, then log in again." : "";
   out.innerHTML = '<div class="err"><div id="status">read failed (' + status + '): ' + (body && body.error || "unknown") + hint + '</div></div>';
 }
 
@@ -53,14 +66,14 @@ $("login").addEventListener("click", async () => {
   }
   $("login").disabled = true;
   try {
-    const token = await window.oauth3.connect({ plugin: "otter", app: "otter-demo", node: NODE });
+    const token = await window.oauth3.connect({ plugin: PLUGIN, app: PLUGIN + "-demo", node: NODE });
     $("token").className = "pill ok"; $("token").textContent = "scoped token ✓";
 
-    const r = await fetch(NODE + "/api/otter/items", { headers: { Authorization: "Bearer " + token } });
+    const r = await fetch(NODE + "/api/" + PLUGIN + "/items", { headers: { Authorization: "Bearer " + token } });
     const body = await r.json().catch(() => ({}));
     if (!r.ok) { showErr(r.status, body); return; }
     const items = body.data || [];
-    out.innerHTML = '<div id="status" class="meta">' + items.length + ' conversations · read with a scoped token, not your cookies</div>'
+    out.innerHTML = '<div id="status" class="meta">' + items.length + ' ' + NOUN + ' · read with a scoped token, not your cookies</div>'
       + items.slice(0, 20).map((it) => '<div class="row"><b>' + (it.title || "(untitled)") + '</b>'
         + '<div class="meta">' + (it.date ? new Date(it.date).toLocaleString() : "") + ' · ' + it.id + '</div></div>').join("");
   } catch (e) {

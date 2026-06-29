@@ -9,8 +9,14 @@
 
 import { cookieHeader, Jar, Plugin, PluginItem } from "./types.ts";
 
-// Overridable so a demo/e2e can point at a fixture server; defaults to live Otter.
-const BASE = Deno.env.get("OTTER_BASE") || "https://otter.ai/forward/api/v1";
+// Live Otter API base. NOTE: must NOT read Deno.env at module top level — the daemon
+// runs the isolated container with --deny-env (env arrives via ctx.env/argv), so a
+// top-level Deno.env.get throws at import and crashes the container. The fixture override
+// (OTTER_BASE, for e2e/demo) comes through the handler's env via configureOtter().
+let BASE = "https://otter.ai/forward/api/v1";
+export function configureOtter(env: Record<string, string>): void {
+  if (env.OTTER_BASE) BASE = env.OTTER_BASE.replace(/\/$/, "");
+}
 const UA = "Mozilla/5.0";
 
 function headers(jar: Jar, extra: Record<string, string> = {}): Record<string, string> {
@@ -52,7 +58,7 @@ async function unzipFirst(buf: Uint8Array): Promise<Uint8Array> {
 
 export const otterPlugin: Plugin = {
   id: "otter",
-  label: "ShapeRotator (Otter.ai)",
+  label: "Otter",
   cookieDomains: [".otter.ai"],
 
   loggedIn(jar: Jar): boolean {
