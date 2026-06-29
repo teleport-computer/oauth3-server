@@ -4,15 +4,23 @@
 // requestId. The app never holds the owner secret.
 
 import { mint } from "./tokens.ts";
+import { route, isListed } from "./routing.ts";
+import type { RouteResult } from "./types.ts";
 
 export interface ConnectReq {
   requestId: string;
   plugin: string;
   subject?: string;
   app?: string;
+  // RFC 0007 §1.1: requested attenuation (breadth axis)
+  scope?: string;
+  // RFC 0007 §1.1: verifiability claim (URL of td-0020 evidence bundle)
+  attestation?: string;
   status: "pending" | "approved" | "denied";
   token?: string;
   createdAt: number;
+  // RFC 0007 §1.4: routing decision cached at request time
+  routeResult?: RouteResult;
 }
 
 let file = "";
@@ -29,9 +37,32 @@ export async function initConnect(dir: string): Promise<void> {
   catch (e) { if (!(e instanceof Deno.errors.NotFound)) throw e; }
 }
 
-export async function createConnect(plugin: string, subject?: string, app?: string): Promise<ConnectReq> {
+export async function createConnect(
+  plugin: string,
+  subject?: string,
+  app?: string,
+  scope?: string,
+  attestation?: string,
+): Promise<ConnectReq | null> {
+  // RFC 0007 M2 acceptance: an app must be listed to be consumable
+  if (!isListed(plugin, scope)) {
+    // Return null to signal rejection — handler returns 404
+    return null;
+  }
+
   const requestId = `req-${crypto.randomUUID().replace(/-/g, "")}`;
-  reqs[requestId] = { requestId, plugin, subject, app, status: "pending", createdAt: Date.now() };
+  const routeResult = route(plugin, scope, attestation);
+  reqs[requestId] = {
+    requestId,
+    plugin,
+    subject,
+    app,
+    scope,
+    attestation,
+    status: "pending",
+    createdAt: Date.now(),
+    routeResult,
+  };
   await persist();
   return reqs[requestId];
 }

@@ -2,7 +2,10 @@
 // cookie jar for that site (synced by the extension) and the plugin turns it into
 // list/fetch reads. This is the seam openfeedling's `shortCheck(cookies)` became.
 
-export type Jar = Record<string, string>;
+import type { CapabilityStatement, Jar } from "../types.ts";
+
+// Re-export Jar for backward compatibility with imports from "./plugins/types.ts"
+export type { Jar };
 
 export interface PluginItem {
   id: string;
@@ -19,6 +22,13 @@ export interface Plugin {
   loggedIn(jar: Jar): boolean; // cheap presence check on a key cookie
   listItems(jar: Jar): Promise<PluginItem[]>;
   fetchItem(jar: Jar, id: string): Promise<unknown>;
+
+  // RFC 0007 §2.4: capability statement + sub-capabilities
+  capability?: CapabilityStatement; // the plugin-wide (b2) statement
+  scopes?: Record<string, { // named narrow attenuations (b1)
+    statement: CapabilityStatement;
+    read(jar: Jar): Promise<unknown>;
+  }>;
 }
 
 export function cookieHeader(jar: Jar): string {
