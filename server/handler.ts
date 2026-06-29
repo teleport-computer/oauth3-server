@@ -25,6 +25,7 @@ import { loginPage } from "./login-page.ts";
 import { createSession, destroySession, initSessions, verifySession } from "./sessions.ts";
 import { newChallenge, verifyDidSignIn } from "./identity.ts";
 import { browserScreenshot } from "./browser.ts";
+import { approveChallenge, createChallenge, denyChallenge, getChallenge, recordTokenUse, score, wasFirstUse } from "./stepup.ts";
 
 let ready = false;
 let ownerSecret = "";
@@ -225,6 +226,35 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return html(approvePage(getConnect(ap[1]), ap[1]));
   }
 
+  // --- step-up challenges (RFC 0005) ---
+  const ch = path.match(/^\/api\/challenge\/([^/]+)(?:\/(approve|deny))?$/);
+  if (ch) {
+    const id = ch[1], action = ch[2];
+    if (req.method === "GET" && !action) {
+      const c = getChallenge(id);
+      if (!c) return json({ error: "unknown challenge" }, 404);
+      // Three outcomes for the polling app:
+      // - approved: retry will succeed
+      // - denied/expired: terminal fail
+      // - pending: keep polling
+      if (c.status === "approved") {
+        return json({ status: "approved", challengeId: c.challengeId });
+      } else if (c.status === "denied" || c.status === "expired") {
+        return json({ status: c.status, challengeId: c.challengeId }, 403);
+      } else {
+        return json({ status: "pending", challengeId: c.challengeId, expiresAt: c.expiresAt });
+      }
+    }
+    if (req.method === "POST" && action) {
+      const body = await req.json().catch(() => null) as any;
+      const approver = subjectOf() ?? (!!ownerSecret && body?.owner_secret === ownerSecret ? "owner" : null);
+      if (!approver) return json({ error: "sign in to respond" }, 401);
+      const c = action === "approve" ? approveChallenge(id, approver, isOwner(req)) : denyChallenge(id, approver, isOwner(req));
+      if (!c) return json({ error: "unknown or already-decided challenge" }, 404);
+      return json({ ok: true, status: c.status, challengeId: c.challengeId });
+    }
+  }
+
   // --- logged-in render via the Browser SPI (same vault jar as /items) ---
   const sc = path.match(/^\/api\/([a-z0-9-]+)\/screenshot$/);
   if (req.method === "GET" && sc) {
@@ -261,8 +291,47 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+
+    // --- step-up gate (RFC 0005 P0) ---
+    // Owner bypasses; only scoped tokens are gated.
+    if (t && !isOwner(req)) {
+      const item = m[2] || "list";
+      const scored = score(bearer, plugin.id, item, t.app);
+      if (scored.decision === "challenge") {
+        const chal = createChallenge(plugin.id, item, bearer, t.app, scored.signal || "unknown");
+        await audit("stepup.challenged", {
+          challengeId: chal.challengeId,
+          plugin: plugin.id,
+          item,
+          app: t.app,
+          signal: scored.signal,
+        });
+        return json({
+          error: "challenge_pending",
+          challengeId: chal.challengeId,
+          message: "Read requires step-up approval. Poll /api/challenge/:id for status.",
+        }, 409);
+      }
+      if (scored.decision === "reject") {
+        await audit("stepup.rejected", {
+          plugin: plugin.id,
+          item,
+          app: t.app,
+          signal: scored.signal,
+        });
+        return json({
+          error: "rejected",
+          signal: scored.signal,
+        }, 403);
+      }
+    }
+
     try {
       const data = m[2] ? await plugin.fetchItem(jar, decodeURIComponent(m[2])) : await plugin.listItems(jar);
+      // Record token use after successful read (marks first-use as consumed)
+      if (t && !isOwner(req)) {
+        recordTokenUse(bearer, plugin.id);
+      }
       await audit("read", { plugin: plugin.id, item: m[2] || "list", by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, data });
     } catch (e) {
