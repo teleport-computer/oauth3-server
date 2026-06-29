@@ -36,3 +36,19 @@ export async function browserScreenshot(spiUrl: string, plugin: Plugin, jar: Jar
   const t = await spi(spiUrl, "/capture-trace", {});
   return { screenshot: t.screenshot, title: t.title, dom_chars: (t.dom_html || "").length };
 }
+
+// RFC 0001 M0: browser ground-truth capture with network_log for reification.
+// Returns the full trace including network_log (XHR/Fetch requests with response bodies).
+export async function browserCaptureTrace(spiUrl: string, plugin: Plugin, jar: Jar, targetUrl: string) {
+  if (!spiUrl) throw new Error("BROWSER_SPI_URL not configured — no browser SPI to drive");
+  await spi(spiUrl, "/session", { cookies: jarToCookies(plugin, jar), userAgent: UA });
+  await spi(spiUrl, "/navigate", { url: targetUrl });
+  await new Promise((res) => setTimeout(res, 5000)); // let logged-in XHR settle
+  const t = await spi(spiUrl, "/capture-trace", {});
+  return {
+    screenshot: t.screenshot,
+    title: t.title,
+    dom_html: t.dom_html,
+    network_log: t.network_log ?? [], // { requestId, method, url, requestHeaders, requestBody, status, responseHeaders, responseBody }
+  };
+}
