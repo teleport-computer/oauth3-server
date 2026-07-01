@@ -6,8 +6,12 @@
 
 const SOURCE = "https://github.com/teleport-computer/oauth3-server";
 
-function shell(title: string, body: string, brandWord = "OAuth<b>3</b>", appName = "OAuth3"): string {
+function shell(title: string, body: string, brandWord = "OAuth<b>3</b>", appName = "OAuth3", base = ""): string {
+  // The pages use relative links (login/privacy/terms/evidence). When the instance is mounted
+  // under a path prefix (e.g. /oauth3) and reached WITHOUT a trailing slash, relative links
+  // resolve against the wrong base (/login instead of /oauth3/login). A <base> pins them.
   return `<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+${base ? `<base href="${base.replace(/\/$/, "")}/">` : ""}
 <title>${title} — ${appName}</title>
 <style>
  body{font:15px/1.6 system-ui,sans-serif;max-width:44rem;margin:3rem auto;padding:0 1.2rem;color:#111}
@@ -29,6 +33,10 @@ function shell(title: string, body: string, brandWord = "OAuth<b>3</b>", appName
 ${body}
 <footer><a href="./">Home</a><a href="login">Sign in</a><a href="privacy">Privacy</a><a href="terms">Terms</a><a href="${SOURCE}">Source</a></footer>
 </body></html>`;
+}
+
+function baseOf(env: Record<string, string>): string {
+  try { return env.PUBLIC_URL ? new URL(env.PUBLIC_URL).pathname : ""; } catch { return ""; }
 }
 
 export function homePage(env: Record<string, string> = {}): string {
@@ -56,7 +64,7 @@ evidence ↗</a>. Prefer your own? It's self-hostable — <a href="${src}">grab 
   <li><b>Sync a site</b> (via the extension): its cookies are stored <b>sealed</b> in the enclave, never in plaintext on a server.</li>
   <li><b>Approve an app</b>: it gets a scoped token to read just what you allowed — revoke it anytime from your dashboard.</li>
 </ul>
-<p class=muted>No raw cookies leave the enclave. The operator cannot read your sealed jar.</p>`, brandWord, appName);
+<p class=muted>No raw cookies leave the enclave. The operator cannot read your sealed jar.</p>`, brandWord, appName, baseOf(env));
 }
 
 export function privacyPage(env: Record<string, string> = {}): string {
@@ -86,7 +94,7 @@ export function privacyPage(env: Record<string, string> = {}): string {
   <li>Deleting a jar removes the sealed cookies from the enclave.</li>
 </ul>
 <h2>Contact</h2>
-<p>Questions: ${esc(contact)}. Or run your own instance — the code is <a href="${env.SOURCE_URL || SOURCE}">open source</a>.</p>`);
+<p>Questions: ${esc(contact)}. Or run your own instance — the code is <a href="${env.SOURCE_URL || SOURCE}">open source</a>.</p>`, undefined, undefined, baseOf(env));
 }
 
 export function termsPage(env: Record<string, string> = {}): string {
@@ -100,14 +108,14 @@ export function termsPage(env: Record<string, string> = {}): string {
   <li>The operator may revoke access or take the instance down at any time.</li>
   <li>OAuth3 is not affiliated with the sites or identity providers you connect through it.</li>
   <li>Prefer different terms? It's self-hostable — <a href="${env.SOURCE_URL || SOURCE}">run your own</a>.</li>
-</ul>`);
+</ul>`, undefined, undefined, baseOf(env));
 }
 
 // "Don't trust the operator" only works if you can check the evidence. Honest about the
 // current state (the pod is dev mode, not yet attested — see #32).
 export function evidencePage(env: Record<string, string> = {}): string {
   const src = env.SOURCE_URL || SOURCE;
-  const attest = env.ATTESTATION_URL || "https://cloud.phala.com/dashboard/cvms/app_915c8197b20b831c52cf97a9fb7e2e104cdc6ae8";
+  const attest = env.ATTESTATION_URL || "https://cloud.phala.com/dashboard/cvms/app_3ab6b2ac28625aaaff0943cb4fd0cf13227760e1";
   const mode = env.INSTANCE_MODE || "dev";
   const attested = mode === "attested";
   return shell("Evidence", `
@@ -121,7 +129,7 @@ export function evidencePage(env: Record<string, string> = {}): string {
 <p>Status: <b>${esc(mode)}</b>. ${attested
     ? "The running code is measured and pinned — a relying party can confirm it matches the source above."
     : "Currently <b>dev</b> mode — the measurement isn't pinned yet, so treat the trust story as in-progress (tracked in issue #32). The source and the enclave above are still inspectable."}</p>
-<p class=muted>Don't want to rely on anyone's instance? <a href="${src}">Run your own.</a></p>`);
+<p class=muted>Don't want to rely on anyone's instance? <a href="${src}">Run your own.</a></p>`, undefined, undefined, baseOf(env));
 }
 
 function esc(s: string): string {
