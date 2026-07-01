@@ -68,7 +68,8 @@ whole model is built to allow). It is the **default consolidated pattern** — t
 paved point in the left/low-breadth region that the system *steers toward*. You may go
 past it, up to handing over the raw credential — but only by bringing attestation or
 clicking dev-mode. Safety is not a wall; it is that **the easy path is the safe path and
-leaving it is explicit.**
+leaving it is explicit.** The *supply side* of consolidated patterns — how a reviewed,
+steer-toward-able pattern comes to exist — is RFC 0009 (scope components).
 
 ## Layer-1 agentic approver — the concrete job
 This gives the ROADMAP's "agentic app-store approver" (auth layer 1) a real algorithm:
