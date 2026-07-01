@@ -106,8 +106,9 @@ Open question: how much of "does the code satisfy its claimed guarantee" is *che
 the daemon/approver automatically* vs *summarized for a human to confirm*. v1 likely:
 daemon vouches for measurement + self-description provenance; the guarantee-check is a
 guided human/agent read. Hardening later: structural checks (egress allowlist enforced by
-the sandbox, so the guarantee is *enforced*, not merely *claimed*). This deserves its own
-RFC once the dstack-webhost attestation surface is pinned down.
+the sandbox, so the guarantee is *enforced*, not merely *claimed*). This landed host-side
+in **td-0020** (attestation facts) + **td-0025** (per-app binding) — build on those, not a
+new oauth3 RFC.
 
 ## Relationship to other RFCs
 - **RFC 0001 (adapter reification loop)** — the per-task cookie-vs-browser tier and the
@@ -123,7 +124,7 @@ RFC once the dstack-webhost attestation surface is pinned down.
   out no credential power at all). Same machinery, breadth = 0.
 
 ## Out of scope / deferred
-- The concrete attestation schema the daemon exposes (its own RFC, gated on dstack-webhost).
+- The concrete attestation schema the daemon exposes — landed in td-0020 (facts) + td-0025 (per-app binding).
 - Account-linking / multi-device identity (tracked with RFC 0002).
 - Automated guarantee-satisfaction proofs — v1 is measurement + guided review; enforced
   sandboxing (egress allowlist) is the first step from *claimed* to *enforced*.

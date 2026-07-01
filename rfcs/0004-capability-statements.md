@@ -43,7 +43,7 @@ Shape exemplars (a guide, not an enum):
 
 Ordered cheap → premium by token/effort cost. **Escalation is a policy, not a
 default**: start cheap, spend the premium pass only where it pays (hot, powerful, or
-contested apps). This is RFC 0001's opportunistic-spend ethos applied to curation —
+contested apps). This is RFC 0000's opportunistic-spend ethos applied to curation —
 don't pay for proof on an app nobody uses.
 
 | workflow | cost | discharges | source of trust |
@@ -110,5 +110,5 @@ class. Build the collection hook before the curator is load-bearing.
   handed to the app/curator as a hint so the negotiation resolves *before* bothering
   the user — "Alice always declines GPS, don't ask"). The demand-side mirror of the
   curator. Its own thread.
-- The concrete attestation surface the daemon exposes (gated on dstack-webhost; likely
-  RFC 0005).
+- The concrete attestation surface the daemon exposes (host-side: td-0020 facts +
+  td-0022 appraisal).

@@ -18,6 +18,7 @@ import { deleteJar, getJar, initVault, jarStatus, setJar } from "./vault.ts";
 import { initTokens, listTokens, mint, revoke, verify } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit } from "./audit.ts";
+import { corpus, initCorpus } from "./corpus.ts";
 import { startScheduler } from "./scheduler.ts";
 import { approvePage } from "./approve-page.ts";
 import { appPage } from "./app-page.ts";
@@ -46,6 +47,7 @@ async function init(env: Record<string, string>, dataDir: string) {
   await initTokens(dataDir);
   await initConnect(dataDir);
   await initAudit(dataDir);
+  initCorpus(dataDir);
   await initSessions(dataDir);
   await initPasskeys(dataDir);
   await initLinks(dataDir);
@@ -416,6 +418,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       const r = action === "approve" ? await approveConnect(id, approver) : await denyConnect(id);
       if (!r) return json({ error: "unknown or already-decided request" }, 404);
       await audit(`connect.${action}`, { subject: approver, plugin: r.plugin, app: r.app, requestId: id });
+      await corpus({ ts: Date.now(), subject: approver, app: r.app, scope: r.plugin, decision: action === "approve" ? "approved" : "denied", grant: r.token });
       return json({ ok: true, status: r.status });
     }
   }

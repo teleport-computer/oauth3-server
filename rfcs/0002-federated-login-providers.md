@@ -147,6 +147,10 @@ password — avoid.
 2. **Account linking** (one human, multiple providers → one identity). Deferred. v1:
    each provider id is its own `subject` / its own vault. A later `link` step can merge
    them; don't design it in now.
+   > **Amendment (shipped):** linking shipped anyway (`server/links.ts`) — any linked
+   > method opens the same room (the "take-over" model). This makes the weakest linked
+   > door the vault's floor, now governed by **RFC 0008** (door tiering + step-up on a
+   > newly-linked door).
 3. **Matrix login UX**: widget OpenID vs a thin homeserver-login page. v1 can be a
    "paste your OpenID token" dev affordance; the widget flow is the demo polish.
 4. **Generic OIDC**: GitHub/Google could collapse into one config-driven OIDC client
