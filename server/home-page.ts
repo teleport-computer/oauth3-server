@@ -117,21 +117,25 @@ export function termsPage(env: Record<string, string> = {}): string {
 // current state (the pod is dev mode, not yet attested — see #32).
 export function evidencePage(env: Record<string, string> = {}): string {
   const src = env.SOURCE_URL || SOURCE;
-  const attest = env.ATTESTATION_URL || "https://cloud.phala.com/dashboard/cvms/app_3ab6b2ac28625aaaff0943cb4fd0cf13227760e1";
-  const mode = env.INSTANCE_MODE || "dev";
-  const attested = mode === "attested";
   return shell("Evidence", `
 <h1>Evidence — don't trust, verify</h1>
 <p class=lede>You shouldn't have to trust the operator personally. Running in a TEE means you can verify the <b>code</b> instead. Here's what to check:</p>
 <h2>1. The source</h2>
 <p>Read exactly what this instance runs: <a href="${src}">${esc(src)}</a>.</p>
 <h2>2. The enclave</h2>
-<p>It runs as a dstack app on Phala (app id <code>915c8197…cae8</code>) inside a Trusted Execution Environment. Attestation / measurement: <a href="${attest}">${esc(attest)}</a>.</p>
+<p>It runs as a dstack app on Phala inside a Trusted Execution Environment. The machine-checkable evidence bundle — the source binding + the platform quote — is at <a href="/_api/verification/oauth3">/_api/verification/oauth3</a>.</p>
 <h2>3. Attested mode</h2>
-<p>Status: <b>${esc(mode)}</b>. ${attested
-    ? "The running code is measured and pinned — a relying party can confirm it matches the source above."
-    : "Currently <b>dev</b> mode — the measurement isn't pinned yet, so treat the trust story as in-progress (tracked in issue #32). The source and the enclave above are still inspectable."}</p>
-<p class=muted>Don't want to rely on anyone's instance? <a href="${src}">Run your own.</a></p>`, undefined, undefined, baseOf(env));
+<p>Status: <b id=att-status>checking the live verifier…</b><span id=att-detail></span></p>
+<p class=muted>Don't want to rely on anyone's instance? <a href="${src}">Run your own.</a></p>
+<script>
+fetch('/_api/verification/oauth3').then(function(r){
+  var s=document.getElementById('att-status'), d=document.getElementById('att-detail');
+  if(r.ok){ s.textContent='attested'; s.style.color='#059669';
+    r.json().then(function(b){ var src=(b.app&&b.app.source)||b.source||{}; var c=src.commit_sha||src.commit||'';
+      d.innerHTML=' — the running code is measured and pinned; a relying party can confirm it matches the source above. <a href="/_api/verification/oauth3">Evidence bundle</a>'+(c?(' (commit <code>'+String(c).slice(0,10)+'</code>)'):'')+'.'; });
+  } else { s.textContent='dev'; d.innerHTML=' — the measurement isn\\'t pinned yet, so the trust story is in-progress. The source and enclave above are still inspectable. <a href="/_api/verification/oauth3">Verifier</a>.'; }
+}).catch(function(){ document.getElementById('att-detail').innerHTML=' — could not reach the verifier; <a href="/_api/verification/oauth3">check it directly</a>.'; });
+</script>`, undefined, undefined, baseOf(env));
 }
 
 function esc(s: string): string {
