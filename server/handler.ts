@@ -31,12 +31,14 @@ import { consumeState, enabledProviders, githubAuthUrl, githubEnv, githubExchang
 import { configureOtter } from "./plugins/otter.ts";
 import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.ts";
 import { verifySiwe } from "./siwe.ts";
-import { browserScreenshot } from "./browser.ts";
+import { browserScreenshot, browserFeed } from "./browser.ts";
+import { apiLike, apiMe, apiTimeline, apiTweet, apiUnlike, browserTrace } from "./twitter-actions.ts";
 
 let ready = false;
 let ownerSecret = "";
 let publicUrl = "";
 let browserSpiUrl = "";
+let browserSpiSecret = "";
 
 export interface HandlerCtx { env: Record<string, string>; dataDir?: string; }
 
@@ -53,6 +55,7 @@ async function init(env: Record<string, string>, dataDir: string) {
   ownerSecret = env.OWNER_SECRET || env.OAUTH3_OWNER_SECRET || env.EXT_SHARED_SECRET || "";
   publicUrl = (env.PUBLIC_URL || "").replace(/\/$/, "");
   browserSpiUrl = (env.BROWSER_SPI_URL || "").replace(/\/$/, "");
+  browserSpiSecret = env.BROWSER_SPI_SECRET || "";
   if (!ownerSecret) console.warn("[init] OWNER_SECRET missing — cookie sync and minting will reject");
   startScheduler(env, dataDir);
   ready = true;
@@ -424,6 +427,42 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return html(approvePage(getConnect(ap[1]), ap[1]));
   }
 
+  // --- Twitter/X debug tool (owner-only). First WRITE surface. Two paths over the
+  // same vault jar: ?path=api (reverse-engineered client) or ?path=browser (real
+  // browser + /capture-trace, the reification instrument). See twitter-actions.ts. ---
+  if (path.startsWith("/api/twitter/debug/")) {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    const jar = getJar("owner", "twitter");
+    if (!jar) return json({ error: "no twitter jar synced" }, 409);
+    const op = path.slice("/api/twitter/debug/".length);
+    const body = req.method === "POST" ? (await req.json().catch(() => ({})) as any) : {};
+    const way = url.searchParams.get("path") || body.path || "api";
+    try {
+      // browser path = record the real request trajectory & reify it (RFC 0001).
+      if (way === "browser") {
+        if (op !== "timeline" && op !== "trace") {
+          return json({ error: `browser-path '${op}' needs the xdotool write-instrument (bridge /eval can't actuate)` }, 501);
+        }
+        const target = url.searchParams.get("url") || "https://x.com/home";
+        const out = await browserTrace(browserSpiUrl, jar, target, browserSpiSecret, op === "trace" ? undefined : op);
+        await audit("twitter.debug", { op, path: "browser", url: out.url });
+        return json({ op, path: "browser", ...out });
+      }
+      // api path
+      let data: unknown;
+      if (op === "me") data = await apiMe(jar);
+      else if (op === "timeline") data = await apiTimeline(jar, Number(url.searchParams.get("count")) || 20);
+      else if (op === "tweet") data = await apiTweet(jar, String(body.text ?? ""));
+      else if (op === "like") data = await apiLike(jar, String(body.tweetId ?? ""));
+      else if (op === "unlike") data = await apiUnlike(jar, String(body.tweetId ?? ""));
+      else return json({ error: `unknown op '${op}'` }, 404);
+      await audit("twitter.debug", { op, path: "api" });
+      return json({ op, path: "api", data });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
+  }
+
   // --- logged-in render via the Browser SPI (same vault jar as /items) ---
   const sc = path.match(/^\/api\/([a-z0-9-]+)\/screenshot$/);
   if (req.method === "GET" && sc) {
@@ -439,9 +478,30 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const target = url.searchParams.get("url") || plugin.renderUrl ||
       `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
     try {
-      const shot = await browserScreenshot(browserSpiUrl, plugin, jar, target);
+      const shot = await browserScreenshot(browserSpiUrl, plugin, jar, target, browserSpiSecret);
       await audit("screenshot", { plugin: plugin.id, url: target, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, url: target, ...shot });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  // --- reconstructed feed as structured JSON (OAuth3's data API). The viewer is a
+  // SEPARATE relying-party app (e.g. /timeline-peek) that fetches this with a scoped
+  // token — not a page served here. Gated by owner or a scoped token.
+  const feedM = path.match(/^\/api\/([a-z0-9-]+)\/feed$/);
+  if (req.method === "GET" && feedM) {
+    const plugin = getPlugin(feedM[1]);
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verify(bearer, plugin.id);
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const target = url.searchParams.get("url") || plugin.renderUrl ||
+      `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
+    try {
+      const { who, items } = await browserFeed(browserSpiUrl, target, browserSpiSecret);
+      await audit("feed", { plugin: plugin.id, count: items.length, by: t ? (t.app || t.subject || "token") : "owner" });
+      return json({ plugin: plugin.id, who, items });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
     }
