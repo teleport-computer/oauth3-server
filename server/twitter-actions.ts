@@ -9,7 +9,6 @@
 //     silently fall back to the API.
 // Owner-only for now (server/handler.ts) — this is OAuth3's first WRITE surface.
 
-import { Rettiwt } from "npm:rettiwt-api@7.1.2";
 import { Jar } from "./plugins/types.ts";
 
 // ---- API path (rettiwt-api) -----------------------------------------------
@@ -17,7 +16,8 @@ import { Jar } from "./plugins/types.ts";
 // under Deno; rettiwt-api is pure-TS and cookie-based, so it's the in-TEE fit.
 // Its apiKey is just the base64 of the site cookie string — twid carries the id.
 
-function rettiwtFromJar(jar: Jar): Rettiwt {
+async function rettiwtFromJar(jar: Jar) {
+  const { Rettiwt } = await import("npm:rettiwt-api@7.1.2");
   if (!jar["auth_token"] || !jar["ct0"] || !jar["twid"]) {
     throw new Error("jar missing auth_token/ct0/twid — not logged in");
   }
@@ -31,23 +31,23 @@ export function apiMe(jar: Jar): unknown {
 }
 
 export async function apiTimeline(jar: Jar, count = 20): Promise<unknown[]> {
-  const tl = await rettiwtFromJar(jar).user.timeline(count);
+  const tl = await (await rettiwtFromJar(jar)).user.timeline(count);
   return (tl?.list ?? []).map((t: any) => ({ id: t.id, text: t.fullText, author: t.tweetBy?.userName }));
 }
 
 export async function apiTweet(jar: Jar, text: string): Promise<unknown> {
   if (!text) throw new Error("empty tweet text");
-  return { op: "tweet", id: await rettiwtFromJar(jar).tweet.post({ text }) };
+  return { op: "tweet", id: await (await rettiwtFromJar(jar)).tweet.post({ text }) };
 }
 
 export async function apiLike(jar: Jar, tweetId: string): Promise<unknown> {
   if (!tweetId) throw new Error("missing tweetId");
-  return { op: "like", tweetId, ok: await rettiwtFromJar(jar).tweet.like(tweetId) };
+  return { op: "like", tweetId, ok: await (await rettiwtFromJar(jar)).tweet.like(tweetId) };
 }
 
 export async function apiUnlike(jar: Jar, tweetId: string): Promise<unknown> {
   if (!tweetId) throw new Error("missing tweetId");
-  return { op: "unlike", tweetId, ok: await rettiwtFromJar(jar).tweet.unlike(tweetId) };
+  return { op: "unlike", tweetId, ok: await (await rettiwtFromJar(jar)).tweet.unlike(tweetId) };
 }
 
 // ---- Browser-path trace instrument (RFC 0001 reification) ------------------
