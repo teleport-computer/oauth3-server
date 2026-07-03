@@ -507,6 +507,33 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     }
   }
 
+  // --- TEMP owner-only jar probe: names + critical-cookie lengths + pod-side fetch (IP-vs-jar). ---
+  if (req.method === "GET" && path === "/api/youtube/debug") {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    const subj = url.searchParams.get("subject") || "owner";
+    const jar = getJar(subj, "youtube");
+    if (!jar) return json({ error: `no jar for ${subj}` }, 409);
+    const crit = ["SID", "HSID", "SSID", "APISID", "SAPISID", "__Secure-1PSID", "__Secure-3PSID", "__Secure-1PAPISID", "__Secure-3PAPISID", "LOGIN_INFO"];
+    const critical = Object.fromEntries(crit.map((c) => [c, c in jar ? (jar[c]?.length ?? 0) : null]));
+    let fetchInfo: Record<string, unknown>;
+    try {
+      const r = await fetch("https://www.youtube.com/feed/history", {
+        headers: {
+          "Cookie": Object.entries(jar).map(([k, v]) => `${k}=${v}`).join("; "),
+          "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+        signal: AbortSignal.timeout(30_000),
+      });
+      const txt = await r.text();
+      const lg = txt.match(/"logged_in","value":"(\d)"/);
+      fetchInfo = { status: r.status, len: txt.length, logged_in: lg ? lg[1] : "?", consentWall: /consent\.(youtube|google)\.com|CONSENT\+PENDING/.test(txt) };
+    } catch (e) {
+      fetchInfo = { error: (e as Error).message };
+    }
+    return json({ subject: subj, count: Object.keys(jar).length, names: Object.keys(jar), critical, fetch: fetchInfo });
+  }
+
   // --- reads (scoped token or owner) ---
   const m = path.match(/^\/api\/([a-z0-9-]+)\/items(?:\/(.+))?$/);
   if (req.method === "GET" && m) {
