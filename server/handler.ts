@@ -14,6 +14,7 @@
 //   GET    /api/:plugin/screenshot            scoped token OR owner — logged-in render via Browser SPI
 
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
+import { configureEgress, egressFetch, egressProxy } from "./egress.ts";
 import { deleteJar, getJar, initVault, jarStatus, setJar } from "./vault.ts";
 import { initTokens, listTokens, mint, revoke, verify } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
@@ -56,6 +57,7 @@ async function init(env: Record<string, string>, dataDir: string) {
   publicUrl = (env.PUBLIC_URL || "").replace(/\/$/, "");
   browserSpiUrl = (env.BROWSER_SPI_URL || "").replace(/\/$/, "");
   browserSpiSecret = env.BROWSER_SPI_SECRET || "";
+  configureEgress(env.EGRESS_PROXY_URL || "");
   if (!ownerSecret) console.warn("[init] OWNER_SECRET missing — cookie sync and minting will reject");
   startScheduler(env, dataDir);
   ready = true;
@@ -515,9 +517,13 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!jar) return json({ error: `no jar for ${subj}` }, 409);
     const crit = ["SID", "HSID", "SSID", "APISID", "SAPISID", "__Secure-1PSID", "__Secure-3PSID", "__Secure-1PAPISID", "__Secure-3PAPISID", "LOGIN_INFO"];
     const critical = Object.fromEntries(crit.map((c) => [c, c in jar ? (jar[c]?.length ?? 0) : null]));
+    // ?egress=1 routes the probe fetch through the shared VPN (so we can A/B the SAME jar
+    // direct-vs-proxied and confirm the datacenter-IP de-auth theory).
+    const viaEgress = url.searchParams.get("egress") === "1";
+    const doFetch = viaEgress ? egressFetch : fetch;
     let fetchInfo: Record<string, unknown>;
     try {
-      const r = await fetch("https://www.youtube.com/feed/history", {
+      const r = await doFetch("https://www.youtube.com/feed/history", {
         headers: {
           "Cookie": Object.entries(jar).map(([k, v]) => `${k}=${v}`).join("; "),
           "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
@@ -531,7 +537,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     } catch (e) {
       fetchInfo = { error: (e as Error).message };
     }
-    return json({ subject: subj, count: Object.keys(jar).length, names: Object.keys(jar), critical, fetch: fetchInfo });
+    return json({ subject: subj, count: Object.keys(jar).length, egress: { via: viaEgress, proxy: egressProxy() || null }, names: Object.keys(jar), critical, fetch: fetchInfo });
   }
 
   // --- reads (scoped token or owner) ---
