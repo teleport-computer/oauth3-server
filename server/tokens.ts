@@ -8,6 +8,7 @@ export interface Token {
   plugin: string;
   subject?: string;
   app?: string;
+  caps?: string[]; // extra capabilities beyond read (e.g. "jar" = raw-jar release)
   createdAt: number;
   revokedAt?: number;
 }
@@ -26,9 +27,9 @@ export async function initTokens(dir: string): Promise<void> {
   catch (e) { if (!(e instanceof Deno.errors.NotFound)) throw e; }
 }
 
-export async function mint(plugin: string, subject?: string, app?: string): Promise<Token> {
+export async function mint(plugin: string, subject?: string, app?: string, caps?: string[]): Promise<Token> {
   const token = `tok-${plugin}-${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
-  const t: Token = { token, plugin, subject, app, createdAt: Date.now() };
+  const t: Token = { token, plugin, subject, app, ...(caps?.length ? { caps } : {}), createdAt: Date.now() };
   tokens[token] = t;
   await persist();
   return t;
@@ -38,6 +39,12 @@ export async function mint(plugin: string, subject?: string, app?: string): Prom
 export function verify(token: string, plugin: string): Token | null {
   const t = tokens[token];
   return t && t.plugin === plugin && !t.revokedAt ? t : null;
+}
+
+// Like verify, but also requires the token to carry a specific capability.
+export function verifyCap(token: string, plugin: string, cap: string): Token | null {
+  const t = verify(token, plugin);
+  return t && t.caps?.includes(cap) ? t : null;
 }
 
 export async function revoke(token: string): Promise<boolean> {

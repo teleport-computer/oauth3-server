@@ -9,6 +9,7 @@ const esc = (s: string) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", 
 export function approvePage(r: ConnectReq | undefined, id: string): string {
   if (!r) return `<!doctype html><meta charset=utf-8><body style="font-family:system-ui;max-width:30rem;margin:3rem auto"><h2>Unknown request</h2><p>No connect request <code>${esc(id)}</code>.</p>`;
   const decided = r.status !== "pending";
+  const jarCap = !!r.caps?.includes("jar");
   return `<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Approve access — OAuth3</title>
 <style>
@@ -17,6 +18,7 @@ export function approvePage(r: ConnectReq | undefined, id: string): string {
  h2{margin:0 0 4px} .sub{color:#666;font-size:13px;margin-bottom:16px}
  .row{display:flex;justify-content:space-between;padding:7px 0;border-top:1px solid #f0f0f0;font-size:14px}
  .k{color:#666}
+ .warn{background:#fff7ed;border:1px solid #fdba74;color:#9a3412;border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:16px}
  button{flex:1;padding:10px;border:0;border-radius:8px;font-size:14px;cursor:pointer;margin-top:12px}
  .approve{background:#16a34a;color:#fff} .deny{background:#f3f4f6;color:#111;margin-left:8px}
  a.signin{display:block;text-align:center;margin-top:14px;background:#3b82f6;color:#fff;padding:11px;border-radius:8px;text-decoration:none}
@@ -24,9 +26,10 @@ export function approvePage(r: ConnectReq | undefined, id: string): string {
 </style></head><body>
 <div class=card>
   <h2>Authorize access</h2>
-  <div class=sub>An app is requesting scoped, revocable read access to your account. It never receives your raw cookies.</div>
+  <div class=sub>An app is requesting scoped, revocable access to your account.${jarCap ? "" : " It never receives your raw cookies."}</div>
+  ${jarCap ? `<div class=warn><b>⚠ This app will receive your raw ${esc(r.plugin)} cookies</b> — the actual session credentials, not just a read of your timeline. Only approve for an app you trust to hold your session (e.g. a TEE app). Revocable at any time.</div>` : ""}
   <div class=row><span class=k>App</span><span>${esc(r.app || "(unnamed app)")}</span></div>
-  <div class=row><span class=k>Reads</span><span>${esc(r.plugin)}</span></div>
+  <div class=row><span class=k>${jarCap ? "Receives" : "Reads"}</span><span>${esc(r.plugin)}${jarCap ? " (raw jar)" : ""}</span></div>
   ${r.subject ? `<div class=row><span class=k>Attributed to</span><span>${esc(r.subject)}</span></div>` : ""}
   <div class=row><span class=k>Status</span><span id=status>${esc(r.status)}</span></div>
   ${decided ? "" : `<div id=actions></div>`}
