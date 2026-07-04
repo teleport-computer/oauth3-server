@@ -19,6 +19,12 @@ export interface Plugin {
   loggedIn(jar: Jar): boolean; // cheap presence check on a key cookie
   listItems(jar: Jar): Promise<PluginItem[]>;
   fetchItem(jar: Jar, id: string): Promise<unknown>;
+  // Optional live-follow surface: the currently-live item's recent segments (with
+  // monotonic `order` for incremental polling) plus any shared-screen frames.
+  live?(jar: Jar, after: number): Promise<unknown>;
+  // Optional binary frame proxy: fetch one site-CDN image with the jar (the app can't
+  // reach the CDN itself — it only holds a scoped token, never the cookie).
+  fetchFrame?(jar: Jar, url: string): Promise<{ bytes: Uint8Array; contentType: string }>;
 }
 
 export function cookieHeader(jar: Jar): string {

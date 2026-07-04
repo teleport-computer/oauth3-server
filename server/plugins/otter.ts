@@ -108,4 +108,43 @@ export const otterPlugin: Plugin = {
     const text = new TextDecoder().decode(await unzipFirst(new Uint8Array(await r.arrayBuffer())));
     return { otid: id, transcript: text };
   },
+
+  // Follow the meeting that's live right now: recent transcript segments (keyed by
+  // `order` so the consumer polls with ?after=), plus the last few shared-screen
+  // frames as raw CDN urls (the consumer fetches each back through /otter/frame).
+  async live(jar: Jar, after: number): Promise<unknown> {
+    const uid = await userId(jar);
+    const res = await getJSON("/speeches", jar, { userid: uid, page_size: "20", source: "owned" });
+    const sp = (res?.speeches ?? []).find((x: any) => x.live_status === "live");
+    if (!sp) return { live: false };
+    const d = (await getJSON("/speech", jar, { userid: uid, otid: sp.otid }))?.speech ?? {};
+    const segs = [...(d.transcripts ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    let rows = segs
+      .map((t: any) => ({ order: Number(t.order ?? 0), text: String(t.transcript ?? "").trim() }))
+      .filter((r) => r.text);
+    rows = after <= 0 ? rows.slice(-40) : rows.filter((r) => r.order > after);
+    const max_order = rows.reduce((m, r) => Math.max(m, r.order), after);
+    const images = [...(d.images ?? [])]
+      .sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0))
+      .slice(-8)
+      .map((im: any) => ({ offset: im.offset, url: im.image_url }));
+    return { live: true, title: sp.title, segments: rows, max_order, images };
+  },
+
+  // Proxy one shared-screen frame. Only the site's own CDN is reachable, so a stray
+  // url in the jar can't turn this into an SSRF.
+  async fetchFrame(jar: Jar, imageUrl: string): Promise<{ bytes: Uint8Array; contentType: string }> {
+    if (!(new URL(imageUrl).hostname || "").endsWith("aisense.com")) {
+      throw new Error("only api.aisense.com frames are proxied");
+    }
+    const media = Object.fromEntries(
+      ["sessionid", "csrftoken"].filter((k) => jar[k]).map((k) => [k, jar[k]]),
+    );
+    const r = await fetch(imageUrl, {
+      headers: { Cookie: cookieHeader(media), "User-Agent": UA, Referer: "https://otter.ai/" },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!r.ok) throw new Error(`otter frame ${r.status}`);
+    return { bytes: new Uint8Array(await r.arrayBuffer()), contentType: r.headers.get("content-type") || "image/png" };
+  },
 };

@@ -11,6 +11,8 @@
 //   POST   /api/connect/:requestId/approve|deny  owner_secret — the user's decision
 //   GET    /approve/:requestId                HTML approval screen
 //   GET    /api/:plugin/items[/:id]           scoped token OR owner — read
+//   GET    /api/:plugin/live[?after=N]        scoped token OR owner — live item segments + frame urls
+//   GET    /api/:plugin/frame?u=<b64url>      scoped token OR owner — proxy one shared-screen image (binary)
 //   GET    /api/:plugin/screenshot            scoped token OR owner — logged-in render via Browser SPI
 
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
@@ -560,6 +562,54 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       fetchInfo = { error: (e as Error).message };
     }
     return json({ subject: subj, count: Object.keys(jar).length, egress: { via: viaEgress, proxy: egressProxy() || null }, names: Object.keys(jar), critical, fetch: fetchInfo });
+  }
+
+  // --- live-follow (scoped token or owner): the currently-live item's recent segments
+  // + shared-screen frame urls. Same read scope as /items. ---
+  const liveM = path.match(/^\/api\/([a-z0-9-]+)\/live$/);
+  if (req.method === "GET" && liveM) {
+    const plugin = getPlugin(liveM[1]);
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    if (!plugin.live) return json({ error: `${plugin.id} has no live view` }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verify(bearer, plugin.id);
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const jar = getJar(subj, plugin.id);
+    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    try {
+      const data = await plugin.live(jar, Number(url.searchParams.get("after") || "0") || 0);
+      await audit("live", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
+      return json({ plugin: plugin.id, data });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  // --- frame proxy (scoped token or owner): stream one shared-screen image from the
+  // site CDN. ?u = base64url of the image url. Binary out, so not the json envelope. ---
+  const frameM = path.match(/^\/api\/([a-z0-9-]+)\/frame$/);
+  if (req.method === "GET" && frameM) {
+    const plugin = getPlugin(frameM[1]);
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    if (!plugin.fetchFrame) return json({ error: `${plugin.id} has no frames` }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verify(bearer, plugin.id);
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const jar = getJar(subj, plugin.id);
+    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    let target: string;
+    try { target = atob((url.searchParams.get("u") || "").replace(/-/g, "+").replace(/_/g, "/")); }
+    catch { return json({ error: "bad frame url" }, 400); }
+    try {
+      const { bytes, contentType } = await plugin.fetchFrame(jar, target);
+      return new Response(bytes as unknown as BodyInit, { headers: { "Content-Type": contentType, "Access-Control-Allow-Origin": "*" } });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
   }
 
   // --- reads (scoped token or owner) ---
