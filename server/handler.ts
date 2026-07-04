@@ -123,6 +123,17 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       return html("<html><body><h1>User Journeys Report</h1><p>Report not found at " + journeysPath + "</p></body></html>");
     }
   }
+  // Admin endpoint to update the journeys report (owner secret required).
+  if (req.method === "POST" && path === "/api/journeys") {
+    if (!isOwner(req)) return json({ error: "unauthorized" }, 401);
+    const html = await req.text();
+    const journeysDir = (ctx.dataDir || ".") + "/journeys";
+    const journeysPath = journeysDir + "/index.html";
+    await Deno.mkdir(journeysDir, { recursive: true });
+    await Deno.writeTextFile(journeysPath, html);
+    await audit("journeys.update", {});
+    return json({ ok: true, path: journeysPath });
+  }
 
   // The instance's own demo app — open it with the extension, no sign-in.
   // ?plugin=<id> picks which adapter to demo (default otter).
