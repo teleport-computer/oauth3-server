@@ -69,8 +69,9 @@ function parseFeed(text: string): FeedItem[] {
   return items;
 }
 
-export async function browserFeed(spiUrl: string, targetUrl: string, secret = ""): Promise<{ who: string; items: FeedItem[] }> {
+export async function browserFeed(spiUrl: string, plugin: Plugin, jar: Jar, targetUrl: string, secret = ""): Promise<{ who: string; items: FeedItem[] }> {
   if (!spiUrl) throw new Error("BROWSER_SPI_URL not configured — no browser SPI to drive");
+  await spi(spiUrl, "/session", { cookies: jarToCookies(plugin, jar), userAgent: UA }, secret); // inject the jar (like screenshot) — the SPI browser has no session otherwise
   await spi(spiUrl, "/navigate", { url: targetUrl }, secret);
   await new Promise((res) => setTimeout(res, 4000));
   // Whose session this is — the SPI's logged-in user, so the app can label the feed.

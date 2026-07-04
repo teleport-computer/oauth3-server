@@ -516,10 +516,14 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const jar = getJar(subj, plugin.id);
+    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     const target = url.searchParams.get("url") || plugin.renderUrl ||
       `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
     try {
-      const { who, items } = await browserFeed(browserSpiUrl, target, browserSpiSecret);
+      const { who, items } = await browserFeed(browserSpiUrl, plugin, jar, target, browserSpiSecret);
       await audit("feed", { plugin: plugin.id, count: items.length, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, who, items });
     } catch (e) {
