@@ -16,7 +16,7 @@
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
 import { configureEgress, egressFetch, egressProxy } from "./egress.ts";
 import { deleteJar, getJar, initVault, jarStatus, setJar } from "./vault.ts";
-import { initTokens, listTokens, mint, revoke, verify } from "./tokens.ts";
+import { initTokens, listTokens, mint, revoke, verify, verifyCap } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit } from "./audit.ts";
 import { startScheduler } from "./scheduler.ts";
@@ -403,8 +403,9 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   if (req.method === "POST" && path === "/api/connect") {
     const body = await req.json().catch(() => null) as any;
     if (!getPlugin(body?.plugin)) return json({ error: "unknown plugin" }, 404);
-    const r = await createConnect(body.plugin, body.subject, body.app);
-    await audit("connect.request", { plugin: r.plugin, app: r.app, requestId: r.requestId });
+    const caps = Array.isArray(body?.caps) ? body.caps.filter((c: unknown) => typeof c === "string") : undefined;
+    const r = await createConnect(body.plugin, body.subject, body.app, caps);
+    await audit("connect.request", { plugin: r.plugin, app: r.app, caps: r.caps, requestId: r.requestId });
     return json({ requestId: r.requestId, approveUrl: `${origin}/approve/${r.requestId}` });
   }
   const conn = path.match(/^\/api\/connect\/([^/]+)(?:\/(approve|deny))?$/);
@@ -486,6 +487,23 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
     }
+  }
+
+  // --- raw-jar release (delegated-jar consumer apps like twitter-debug). This crosses the
+  // "app never sees the raw jar" line, so it is gated by owner OR a token that carries the
+  // "jar" capability — which is only granted through an explicit consent screen at approve time. ---
+  const jarM = path.match(/^\/api\/([a-z0-9-]+)\/jar$/);
+  if (req.method === "GET" && jarM) {
+    const plugin = getPlugin(jarM[1]);
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verifyCap(bearer, plugin.id, "jar");
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const jar = getJar(subj, plugin.id);
+    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    await audit("jar.release", { plugin: plugin.id, subject: subj, count: Object.keys(jar).length, by: t ? (t.app || t.subject || "token") : "owner" });
+    return json({ plugin: plugin.id, subject: subj, jar });
   }
 
   // --- reconstructed feed as structured JSON (OAuth3's data API). The viewer is a
