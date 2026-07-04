@@ -113,6 +113,17 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   if (req.method === "GET" && path === "/terms") return html(termsPage(ctx.env));
   if (req.method === "GET" && path === "/evidence") return html(evidencePage(ctx.env));
 
+  // User journeys test report — static HTML from disk if available.
+  if (req.method === "GET" && (path === "/journeys" || path === "/journeys/")) {
+    const journeysPath = (ctx.dataDir || ".") + "/journeys/index.html";
+    try {
+      const journeysHtml = await Deno.readTextFile(journeysPath);
+      return html(journeysHtml);
+    } catch {
+      return html("<html><body><h1>User Journeys Report</h1><p>Report not found at " + journeysPath + "</p></body></html>");
+    }
+  }
+
   // The instance's own demo app — open it with the extension, no sign-in.
   // ?plugin=<id> picks which adapter to demo (default otter).
   if (req.method === "GET" && (path === "/app" || path === "/app/")) {
