@@ -10,6 +10,7 @@ export interface ConnectReq {
   plugin: string;
   subject?: string;
   app?: string;
+  caps?: string[]; // requested capabilities (e.g. "jar", "write:event:<id>"); surfaced on the approve page for consent
   status: "pending" | "approved" | "denied";
   token?: string;
   createdAt: number;
@@ -29,9 +30,9 @@ export async function initConnect(dir: string): Promise<void> {
   catch (e) { if (!(e instanceof Deno.errors.NotFound)) throw e; }
 }
 
-export async function createConnect(plugin: string, subject?: string, app?: string): Promise<ConnectReq> {
+export async function createConnect(plugin: string, subject?: string, app?: string, caps?: string[]): Promise<ConnectReq> {
   const requestId = `req-${crypto.randomUUID().replace(/-/g, "")}`;
-  reqs[requestId] = { requestId, plugin, subject, app, status: "pending", createdAt: Date.now() };
+  reqs[requestId] = { requestId, plugin, subject, app, ...(caps?.length ? { caps } : {}), status: "pending", createdAt: Date.now() };
   await persist();
   return reqs[requestId];
 }
@@ -43,7 +44,9 @@ export function getConnect(id: string): ConnectReq | undefined { return reqs[id]
 export async function approveConnect(id: string, approver: string): Promise<ConnectReq | null> {
   const r = reqs[id];
   if (!r || r.status !== "pending") return null;
-  const t = await mint(r.plugin, approver, r.app);
+  // The minted token carries the requested caps (e.g. write:event:<id>) only after the
+  // approver sees them on the consent screen — informed consent for a write capability.
+  const t = await mint(r.plugin, approver, r.app, r.caps);
   r.status = "approved";
   r.token = t.token;
   await persist();

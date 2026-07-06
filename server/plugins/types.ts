@@ -19,6 +19,10 @@ export interface Plugin {
   loggedIn(jar: Jar): boolean; // cheap presence check on a key cookie
   listItems(jar: Jar): Promise<PluginItem[]>;
   fetchItem(jar: Jar, id: string): Promise<unknown>;
+  // Optional write primitive (the edit-on-behalf surface). Symmetric with fetchItem.
+  // Gated at the handler by owner OR a structured cap (e.g. write:event:<id>); plugins
+  // that don't expose writes leave this undefined.
+  editItem?(jar: Jar, id: string, patch: unknown): Promise<unknown>;
 }
 
 export function cookieHeader(jar: Jar): string {
