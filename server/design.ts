@@ -1,11 +1,9 @@
-// Shared pod design system — "constructivist overprint". Inlined once per page that
-// needs it (server pages are template literals: import DESIGN_CSS, drop it into a
-// single <style>). Source of truth: ~/paseo-batch/specs/design/ (tokens.css +
-// components.css). Re-ink by editing the token block below, never hardcode hex in a
-// page. Both themes (prefers-color-scheme + data-theme) are handled by the tokens.
+// Single source for the pod design system ("constructivist overprint", watermelon-classic
+// inks). Verbatim concatenation of the canonical tokens.css + components.css that live beside
+// ~/paseo-batch/specs/design/design-system.md. Inline this once per page from shell()/layout;
+// style through the custom properties, never hardcode hex. See issue #58.
 
-export const DESIGN_CSS = `/* ===== tokens.css ===== */
-/* oauth3 / pod.dstack — design tokens
+export const DESIGN_CSS = String.raw`/* oauth3 / pod.dstack — design tokens
    system: CONSTRUCTIVIST OVERPRINT — Rodchenko geometry printed as a two-ink riso.
    primary inking: "watermelon classic"  ink1 #00838a (teal) · ink2 #ff48b0 (fluoro pink)
    Re-ink an app by overriding --ink1/--ink2/--deep (+ dark variants); everything else derives. */
@@ -50,7 +48,7 @@ export const DESIGN_CSS = `/* ===== tokens.css ===== */
   --wash1: color-mix(in srgb, #2fbdc4 20%, #0e1f21);
   --wash2: color-mix(in srgb, #ff5fbb 20%, #0e1f21);
   --i1-text: #5fd3d9; --i2-text: #ff8ccb;
-  --warn: #e0b34a; --warn-wash: color-mix(in srgb, #e0a41a 18%, #0e1f21);
+  --warn: #e0b34a; --warn-wash: color-mix(in srgb, #e0b34a 18%, #0e1f21);
 } }
 :root[data-theme="dark"] {
   --ink1: #2fbdc4; --ink2: #ff5fbb;
@@ -62,7 +60,7 @@ export const DESIGN_CSS = `/* ===== tokens.css ===== */
   --wash1: color-mix(in srgb, #2fbdc4 20%, #0e1f21);
   --wash2: color-mix(in srgb, #ff5fbb 20%, #0e1f21);
   --i1-text: #5fd3d9; --i2-text: #ff8ccb;
-  --warn: #e0b34a; --warn-wash: color-mix(in srgb, #e0a41a 18%, #0e1f21);
+  --warn: #e0b34a; --warn-wash: color-mix(in srgb, #e0b34a 18%, #0e1f21);
 }
 :root[data-theme="light"] {
   --ink1: #00838a; --ink2: #ff48b0;
@@ -81,7 +79,6 @@ export const DESIGN_CSS = `/* ===== tokens.css ===== */
 :root { --ink1:#6f57a8; --ink2:#b5d33d; --deep:#2e2745; --overprint:#31491f;
         --i1-text:#5a4590; --i2-text:#6d8317; }                                  */
 
-/* ===== components.css ===== */
 /* oauth3 / pod.dstack — component conventions (requires tokens.css) */
 
 body { background: var(--bg); color: var(--text); font: 15px/1.6 var(--sans); }
@@ -153,4 +150,5 @@ a { color: var(--i1-text); }
 .meter .track i.warn { background: var(--warn); }
 
 /* vertical side-label (decorative, one per page max) */
-.side { font: 800 12px var(--cond); text-transform: uppercase; letter-spacing: .4em; color: var(--ink2); writing-mode: vertical-rl; }`;
+.side { font: 800 12px var(--cond); text-transform: uppercase; letter-spacing: .4em; color: var(--ink2); writing-mode: vertical-rl; }
+`;
