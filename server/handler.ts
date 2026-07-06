@@ -15,7 +15,7 @@
 
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
 import { deleteJar, getJar, initVault, jarStatus, setJar } from "./vault.ts";
-import { initTokens, listTokens, mint, revoke, verify } from "./tokens.ts";
+import { initTokens, listTokens, mint, revoke, verify, verifyCap } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit } from "./audit.ts";
 import { startScheduler } from "./scheduler.ts";
@@ -420,8 +420,11 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   if (req.method === "POST" && path === "/api/connect") {
     const body = await req.json().catch(() => null) as any;
     if (!getPlugin(body?.plugin)) return json({ error: "unknown plugin" }, 404);
-    const r = await createConnect(body.plugin, body.subject, body.app);
-    await audit("connect.request", { plugin: r.plugin, app: r.app, requestId: r.requestId });
+    // caps (e.g. "jar", "write:event:<id>") are surfaced on the approve page for informed
+    // consent; the minted token only carries them after the owner approves.
+    const caps = Array.isArray(body?.caps) ? body.caps.filter((c: unknown) => typeof c === "string") : undefined;
+    const r = await createConnect(body.plugin, body.subject, body.app, caps);
+    await audit("connect.request", { plugin: r.plugin, app: r.app, caps: r.caps, requestId: r.requestId });
     return json({ requestId: r.requestId, approveUrl: `${origin}/approve/${r.requestId}` });
   }
   const conn = path.match(/^\/api\/connect\/([^/]+)(?:\/(approve|deny))?$/);
@@ -486,6 +489,41 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       const data = m[2] ? await plugin.fetchItem(jar, decodeURIComponent(m[2])) : await plugin.listItems(jar);
       await audit("read", { plugin: plugin.id, item: m[2] || "list", by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, data });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  // --- google-calendar event-scoped WRITE (RFC: edit-on-behalf, attenuated to one event).
+  // The owner may always edit; a delegated app may edit ONE event only if its token carries
+  // the structured cap "write:event:<eventId>". verifyCap rejects any other event id (exact
+  // string match — "write:event:A" does not satisfy "write:event:B") and rejects read-only
+  // tokens. Every write attempt is audited, authorized or not. The actual session write
+  // against calendar.google.com is captured from a live trajectory (operator-run, #69); until
+  // then plugin.editItem throws an honest error rather than assuming an endpoint. ---
+  const gcEvt = path.match(/^\/api\/google-calendar\/event\/([^/]+)$/);
+  if (req.method === "POST" && gcEvt) {
+    const eventId = decodeURIComponent(gcEvt[1]);
+    const plugin = getPlugin("google-calendar");
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const cap = `write:event:${eventId}`;
+    const t = verifyCap(bearer, "google-calendar", cap);
+    if (!isOwner(req) && !t) {
+      await audit("google-calendar.event.edit.denied", { eventId, reason: "unauthorized" });
+      return json({ error: `unauthorized — token must carry ${cap}` }, 401);
+    }
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const by = t ? (t.app || t.subject || "token") : "owner";
+    const body = await req.json().catch(() => null) as { changes?: unknown } | null;
+    const jar = getJar(subj, "google-calendar");
+    if (!jar) return json({ error: "no jar synced for google-calendar" }, 409);
+    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    await audit("google-calendar.event.edit", { eventId, subject: subj, by });
+    if (!plugin.editItem) return json({ error: "plugin does not expose writes" }, 501);
+    try {
+      const result = await plugin.editItem(jar, eventId, body?.changes);
+      return json({ ok: true, plugin: "google-calendar", eventId, result });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
     }
