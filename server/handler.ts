@@ -6,6 +6,7 @@
 //   GET    /api/tokens                        owner — list tokens
 //   DELETE /api/tokens/:token                 owner — revoke a token
 //   GET    /api/audit                         owner — audit log
+//   GET    /api/promote                       owner — proposed scope ingredients from observed reads
 //   POST   /api/connect   {plugin,subject?,app?}   app — start the grant handshake
 //   GET    /api/connect/:requestId            app — poll status (token once approved)
 //   POST   /api/connect/:requestId/approve|deny  owner_secret — the user's decision
@@ -33,6 +34,7 @@ import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.
 import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot } from "./browser.ts";
 import { scopeLabel, scopeReads } from "./scopes.ts";
+import { proposeIngredients } from "./promoter.ts";
 
 let ready = false;
 let ownerSecret = "";
@@ -415,6 +417,15 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!subj) return json({ error: "unauthorized" }, 401);
     const all = auditLog();
     return json({ audit: subj === "owner" ? all : all.filter((e) => (e.detail as { subject?: string } | undefined)?.subject === subj) });
+  }
+
+  // The 4th self-improvement loop (#72): cluster the gate-allow audit events per app/plugin
+  // and PROPOSE named scope ingredients (entries for scopes.ts) capturing exactly what each
+  // app was observed reading. Owner-only: it reads everyone's audit trail. Output is the
+  // decision doc for curating a new ingredient (name/label are drafts; a human finalizes).
+  if (req.method === "GET" && path === "/api/promote") {
+    if (!isOwner(req)) return json({ error: "unauthorized" }, 401);
+    return json({ proposals: proposeIngredients(auditLog()) });
   }
 
   // --- connect / approval ---
