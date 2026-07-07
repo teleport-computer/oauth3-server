@@ -7,6 +7,8 @@
 //   DELETE /api/tokens/:token                 owner — revoke a token
 //   GET    /api/audit                         owner — audit log
 //   GET    /api/promote                       owner — proposed scope ingredients from observed reads
+//   GET    /api/scopes                        public — enforced scope-ingredient ledger (label = shown scope)
+//   GET    /api/scopes/:id                    public — one enforced ingredient (404 if unknown)
 //   POST   /api/connect   {plugin,subject?,app?}   app — start the grant handshake
 //   GET    /api/connect/:requestId            app — poll status (token once approved)
 //   POST   /api/connect/:requestId/approve|deny  owner_secret — the user's decision
@@ -33,7 +35,7 @@ import { configureOtter } from "./plugins/otter.ts";
 import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.ts";
 import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot } from "./browser.ts";
-import { scopeLabel, scopeReads } from "./scopes.ts";
+import { scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
 import { proposeIngredients } from "./promoter.ts";
 
 let ready = false;
@@ -417,6 +419,20 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!subj) return json({ error: "unauthorized" }, 401);
     const all = auditLog();
     return json({ audit: subj === "owner" ? all : all.filter((e) => (e.detail as { subject?: string } | undefined)?.subject === subj) });
+  }
+
+  // The enforced scope-ingredient ledger, public + read-only (RFC 0004 — closure-can't-drift):
+  // the scope sentence shown to a user MUST come from here, not an app-authored string, so
+  // the displayed claim is provably what's enforced at the gate (#73). An app fetching this
+  // pre-approval has no token yet; the labels are not secret (they appear in gate 403s).
+  if (req.method === "GET" && path === "/api/scopes") {
+    return json({ scopes: scopeIngredients() });
+  }
+  const scopeMatch = path.match(/^\/api\/scopes\/(.+)$/);
+  if (req.method === "GET" && scopeMatch) {
+    const id = decodeURIComponent(scopeMatch[1]);
+    const ing = scopeIngredient(id);
+    return ing ? json(ing) : json({ error: `unknown scope ingredient: ${id}` }, 404);
   }
 
   // The 4th self-improvement loop (#72): cluster the gate-allow audit events per app/plugin
