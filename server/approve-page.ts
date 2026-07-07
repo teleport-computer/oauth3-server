@@ -3,6 +3,7 @@
 // once and back. Relative urls so it works behind the daemon's /<project>/ prefix.
 
 import type { ConnectReq } from "./connect.ts";
+import { pluginCapability } from "./scopes.ts";
 import { DESIGN_CSS } from "./design.ts";
 
 const esc = (s: string) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
@@ -18,6 +19,11 @@ export function approvePage(r: ConnectReq | undefined, id: string): string {
   const writeEvents = (r.caps || []).filter((c) => c.startsWith("write:event:")).map((c) => c.slice("write:event:".length));
   const jarCap = !!r.caps?.includes("jar");
   const writes = writeEvents.length > 0;
+  // The capability statement for the requested plugin, read straight from the enforced
+  // ledger in scopes.ts (RFC 0009 step 1 / RFC 0004 anti-hollow-green): the shown sentence
+  // is provably what the gate enforces, never an app-authored string that can drift.
+  const cap = pluginCapability(r.plugin);
+  const capStmt = cap ? `<div class=note><b>What this token can do.</b> ${esc(cap.statement)}</div>` : "";
   return `<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Approve access — OAuth3</title>
 <style>${DESIGN_CSS}
@@ -44,6 +50,7 @@ export function approvePage(r: ConnectReq | undefined, id: string): string {
 <div class=card>
   <b class=title>Authorize access</b>
   <div class=sub>An app is requesting scoped, revocable ${writes || jarCap ? "access" : "read access"} to your account.${writes || jarCap ? "" : " It never receives your raw cookies."}</div>
+  ${capStmt}
   ${jarCap ? `<div class=consent><b>⚠ This app will receive your raw ${esc(r.plugin)} cookies</b> — the actual session credentials, not just a read. Only approve an app you trust to hold your session. Revocable at any time.</div>` : ""}
   ${writeEvents.map((e) => `<div class=consent><b>⚠ This app can EDIT event <code>${esc(e)}</code> on your ${esc(r.plugin)}.</b> A write action on your behalf, attenuated to that one event only — it cannot edit any other event, and only while this token is valid.</div>`).join("")}
   <div class=apphead><span class=label>requesting app</span><span class=appname>${esc(r.app || "(unnamed app)")}</span></div>

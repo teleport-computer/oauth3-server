@@ -5,8 +5,10 @@
 // plus an in-process handler test mirroring tokens_test.ts (dataDir:"" = in-memory).
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
+import { pluginCapabilities, pluginCapability, scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
 import { mint } from "./tokens.ts";
+import { approvePage } from "./approve-page.ts";
+import type { ConnectReq } from "./connect.ts";
 import handler from "./handler.ts";
 
 // --- pure logic ---
@@ -109,4 +111,50 @@ Deno.test("handler GET /api/scopes(+/:id) — public, exact enforced label", asy
 
   // Unknown ingredient -> 404 (no drift to a made-up label).
   assertEquals((await get("/api/scopes/nope:not-real")).status, 404);
+});
+
+// --- plugin capability statements (RFC 0009 step 1) — one operator-authored sentence per
+// in-tree plugin, surfaced on the approve page AND via the /api/scopes ledger from ONE
+// source (RFC 0004 anti-hollow-green). The set MUST cover every plugin under server/plugins/.
+Deno.test("pluginCapabilities: a CAN/CANNOT statement for every in-tree plugin", () => {
+  const all = pluginCapabilities();
+  assertEquals(
+    all.map((p) => p.plugin).sort(),
+    ["google-calendar", "nytimes", "otter", "reddit", "twitter", "youtube"],
+  );
+  for (const p of all) {
+    assert(p.statement.length > 0, `${p.plugin} has a statement`);
+    assert(/\bCAN\b/.test(p.statement), `${p.plugin} says what it CAN read`);
+    assert(/\bCANNOT\b/.test(p.statement), `${p.plugin} says what it CANNOT touch`);
+  }
+});
+
+Deno.test("pluginCapability: exact record by plugin; undefined when unknown", () => {
+  const ot = pluginCapability("otter")!;
+  assertEquals(ot.plugin, "otter");
+  assert(ot.statement.includes("otter.ai"));
+  assertEquals(pluginCapability("not-a-plugin"), undefined);
+});
+
+// The no-drift money shot: the approve page renders the EXACT ledger statement for the
+// requested plugin (same object the gate serves), not a second app-authored copy. And it
+// degrades gracefully (no statement block) for a plugin with no ledger entry.
+Deno.test("approvePage: renders the exact ledger statement for the requested plugin", () => {
+  const r: ConnectReq = { requestId: "req-x", plugin: "otter", app: "share-app", status: "pending", createdAt: 0 };
+  const html = approvePage(r, "req-x");
+  const stmt = pluginCapability("otter")!.statement;
+  assert(html.includes(stmt), "approve page renders the exact ledger statement (no drift)");
+  // graceful when the plugin has no statement yet
+  const unk: ConnectReq = { requestId: "req-y", plugin: "mystery", app: "x", status: "pending", createdAt: 0 };
+  assert(!approvePage(unk, "req-y").includes("What this token can do"));
+});
+
+Deno.test("handler GET /api/scopes — ledger also surfaces the plugin statements", async () => {
+  const ctx = { env: {}, dataDir: "" };
+  const res = await handler(new Request("http://localhost/api/scopes"), ctx);
+  assertEquals(res.status, 200);
+  const body = await res.json();
+  const ot = body.plugins.find((p: { plugin: string }) => p.plugin === "otter");
+  assert(ot, "ledger lists the otter capability statement");
+  assert((ot.statement as string).includes("otter.ai"));
 });

@@ -15,6 +15,54 @@ export const SCOPE_INGREDIENTS: Record<string, { plugin: string; reads: string[]
     },
   };
 
+// Per-plugin capability statements (RFC 0009 step 1) — the operator-authored sentence shown
+// on the approve page for informed consent: what a token for this plugin CAN read and CANNOT
+// touch. The approve dialog renders `pluginCapability(req.plugin).statement` straight from
+// here, and GET /api/scopes surfaces the same list, so the shown sentence can't drift from
+// this source (RFC 0004 anti-hollow-green). One entry per in-tree plugin under server/plugins/.
+export const PLUGIN_CAPABILITIES: Record<string, { plugin: string; statement: string }> = {
+  otter: {
+    plugin: "otter",
+    statement:
+      "CAN read your conversation list, each transcript, the current live meeting's segments and shared-screen frames, and a logged-in screenshot of otter.ai. CANNOT edit, delete, or share anything.",
+  },
+  youtube: {
+    plugin: "youtube",
+    statement:
+      "CAN read your watch history (videos and Shorts, each flagged isShort) and a logged-in screenshot of youtube.com. CANNOT like, subscribe, comment, remove from history, or upload.",
+  },
+  reddit: {
+    plugin: "reddit",
+    statement:
+      "CAN read your saved posts and comments (and each item's full body/url) and a logged-in screenshot of reddit.com. CANNOT save, vote, post, comment, or edit.",
+  },
+  nytimes: {
+    plugin: "nytimes",
+    statement:
+      "BROWSER-PATH — reads only succeed via the browser (Teleport Computer), not a server-side replay. CAN read your Reading List (saved articles) and a logged-in screenshot of nytimes.com. CANNOT save, subscribe, or edit.",
+  },
+  twitter: {
+    plugin: "twitter",
+    statement:
+      "BROWSER-PATH — no frozen API. CAN read a logged-in screenshot of your x.com timeline (the only read). CANNOT read the timeline as structured data, tweet, like, retweet, follow, or DM.",
+  },
+  "google-calendar": {
+    plugin: "google-calendar",
+    statement:
+      "CAN read your upcoming events and a logged-in screenshot of calendar.google.com; a token MAY also carry a write:event:<id> cap to edit ONE named event. CANNOT create or delete events, or edit any event not named in its caps.",
+  },
+};
+
+// The full plugin-capability ledger (one statement per in-tree plugin). Public/read-only.
+export function pluginCapabilities(): { plugin: string; statement: string }[] {
+  return Object.values(PLUGIN_CAPABILITIES);
+}
+// The exact enforced statement for one plugin; undefined when unknown (no drift to a made-up sentence).
+export function pluginCapability(plugin: string): { plugin: string; statement: string } | undefined {
+  const c = PLUGIN_CAPABILITIES[plugin];
+  return c ? { ...c } : undefined;
+}
+
 // The enforced ingredient ledger, surfaced for the UX layer (RFC 0004 — closure-can't-drift):
 // the scope sentence shown to a user MUST come from here, not an app-authored string, so
 // the displayed claim is provably what's enforced at the gate. Public/read-only by design
