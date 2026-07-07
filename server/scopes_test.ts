@@ -5,7 +5,7 @@
 // plus an in-process handler test mirroring tokens_test.ts (dataDir:"" = in-memory).
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { scopeLabel, scopeReads } from "./scopes.ts";
+import { scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
 import { mint } from "./tokens.ts";
 import handler from "./handler.ts";
 
@@ -62,4 +62,51 @@ Deno.test("handler GET /api/otter/items — read-scope gating", async () => {
   assertEquals((await get("/api/otter/items", legacy.token)).status, 409);
   // Owner is unrestricted -> passes the gate -> 409 no jar (NOT 403).
   assertEquals((await get("/api/otter/items", OWNER)).status, 409);
+});
+
+// --- /api/scopes: the enforced-ingredient ledger is what the UX layer must render (#73).
+// The shown scope sentence can't drift from what's enforced because the receipt FETCHES the
+// label from here instead of using an app-authored string. Public + read-only.
+Deno.test("scopeIngredients: surfaces the enforced ledger with ids", () => {
+  const all = scopeIngredients();
+  const live = all.find((i) => i.id === "otter:live-follow")!;
+  assert(live, "otter:live-follow is seeded");
+  assertEquals(live.plugin, "otter");
+  assertEquals([...live.reads].sort(), ["frame", "live"]);
+  assert(live.label.includes("the current live meeting"), "label is the enforced sentence");
+});
+
+Deno.test("scopeIngredient: exact enforced record by id; undefined when unknown", () => {
+  const live = scopeIngredient("otter:live-follow")!;
+  assertEquals(live.id, "otter:live-follow");
+  assertEquals(live.plugin, "otter");
+  assertEquals(scopeIngredient("nope:not-real"), undefined);
+});
+
+// In-process handler: the ledger is reachable unauthenticated (an app about to ask for
+// consent has no token yet), and the single-ingredient fetch returns the EXACT enforced
+// label — the non-drift property a receipt relies on.
+Deno.test("handler GET /api/scopes(+/:id) — public, exact enforced label", async () => {
+  const ctx = { env: {}, dataDir: "" }; // no OWNER_SECRET — proves these are public
+  const get = (p: string) => handler(new Request(`http://localhost${p}`), ctx);
+
+  const list = await get("/api/scopes");
+  assertEquals(list.status, 200);
+  const listBody = await list.json();
+  const live = listBody.scopes.find((i: { id: string }) => i.id === "otter:live-follow");
+  assert(live, "ledger lists otter:live-follow");
+  assert(live.label.includes("the current live meeting"));
+
+  // The verify bullet from the issue: GET /api/scopes/otter:live-follow returns the exact
+  // enforced label (and the reads that back the #71 403 behavior).
+  const one = await get("/api/scopes/otter:live-follow");
+  assertEquals(one.status, 200);
+  const oneBody = await one.json();
+  assertEquals(oneBody.id, "otter:live-follow");
+  assertEquals(oneBody.plugin, "otter");
+  assertEquals([...oneBody.reads as string[]].sort(), ["frame", "live"]);
+  assert((oneBody.label as string).includes("the current live meeting"));
+
+  // Unknown ingredient -> 404 (no drift to a made-up label).
+  assertEquals((await get("/api/scopes/nope:not-real")).status, 404);
 });
