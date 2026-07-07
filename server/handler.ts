@@ -42,6 +42,7 @@ import { browserScreenshot, browserFeed } from "./browser.ts";
 import { apiLike, apiMe, apiTimeline, apiTweet, apiUnlike, browserTrace } from "./twitter-actions.ts";
 import { pluginCapabilities, scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
 import { proposeIngredients } from "./promoter.ts";
+import { approveChallenge, createChallenge, denyChallenge, getChallenge, recordTokenUse, score, wasFirstUse } from "./stepup.ts";
 
 let ready = false;
 let ownerSecret = "";
@@ -513,6 +514,36 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return html(approvePage(getConnect(ap[1]), ap[1]));
   }
 
+  // --- step-up challenges (RFC 0005) — out-of-band confirmation channel for the gate
+  // below. The app polls GET, the user (session or owner_secret) answers POST. ---
+  const ch = path.match(/^\/api\/challenge\/([^/]+)(?:\/(approve|deny))?$/);
+  if (ch) {
+    const id = ch[1], action = ch[2];
+    if (req.method === "GET" && !action) {
+      const c = getChallenge(id);
+      if (!c) return json({ error: "unknown challenge" }, 404);
+      // Three outcomes for the polling app:
+      // - approved: retry will succeed
+      // - denied/expired: terminal fail
+      // - pending: keep polling
+      if (c.status === "approved") {
+        return json({ status: "approved", challengeId: c.challengeId });
+      } else if (c.status === "denied" || c.status === "expired") {
+        return json({ status: c.status, challengeId: c.challengeId }, 403);
+      } else {
+        return json({ status: "pending", challengeId: c.challengeId, expiresAt: c.expiresAt });
+      }
+    }
+    if (req.method === "POST" && action) {
+      const body = await req.json().catch(() => null) as any;
+      const approver = subjectOf() ?? (!!ownerSecret && body?.owner_secret === ownerSecret ? "owner" : null);
+      if (!approver) return json({ error: "sign in to respond" }, 401);
+      const c = action === "approve" ? approveChallenge(id, approver, isOwner(req)) : denyChallenge(id, approver, isOwner(req));
+      if (!c) return json({ error: "unknown or already-decided challenge" }, 404);
+      return json({ ok: true, status: c.status, challengeId: c.challengeId });
+    }
+  }
+
   // --- Twitter/X debug tool (owner-only). First WRITE surface. Two paths over the
   // same vault jar: ?path=api (reverse-engineered client) or ?path=browser (real
   // browser + /capture-trace, the reification instrument). See twitter-actions.ts. ---
@@ -550,17 +581,42 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   }
 
   // The read chokepoint — every scoped read passes here after auth and before the jar is
-  // touched. Two RFC seams at one point: (A) RFC 0003/0004 scope enforcement — a token
+  // touched. Three seams at one point: (A) RFC 0003/0004 scope enforcement — a token
   // carrying a scope-ingredient cap is confined to that ingredient's reads; owner + legacy
-  // tokens (no scope cap) are UNRESTRICTED (scopeReads → null); this is the dial actually
-  // enforced. (B) RFC 0005 step-up shell — log a risk line for every read (kind + who) so
-  // the chokepoint accrues an audit corpus; NO scoring/enforcement yet, just the seam.
-  async function gateRead(t: Token | null, pluginId: string, readKind: string): Promise<Response | null> {
+  // tokens (no scope cap) are UNRESTRICTED (scopeReads → null). (B) RFC 0005 step-up gate —
+  // a scoped token's first read is held for out-of-band confirmation (challenge_pending,
+  // 409); a future reject signal would 403; the owner bypasses. (C) every passing read is
+  // audited so the chokepoint accrues a corpus. First-use is consumed only AFTER a
+  // successful read (recordTokenUse at each read call site), so a challenged read that never
+  // completes stays hot — the app must answer the challenge AND get a clean read to clear it.
+  async function gateRead(t: Token | null, pluginId: string, readKind: string, bearer: string): Promise<Response | null> {
     const by = t ? (t.app || t.subject || "token") : "owner";
     const allowed = scopeReads(t?.caps);
     if (allowed && !allowed.has(readKind)) {
       await audit("gate", { plugin: pluginId, readKind, decision: "deny", by });
       return json({ error: `scope: this token may read ${[...allowed].join("+")} only, not ${readKind}`, scope: scopeLabel(t?.caps) }, 403);
+    }
+    if (t && !isOwner(req)) {
+      const scored = score(bearer, pluginId, readKind, t.app);
+      if (scored.decision === "challenge") {
+        const chal = createChallenge(pluginId, readKind, bearer, t.app, scored.signal || "unknown");
+        await audit("stepup.challenged", {
+          challengeId: chal.challengeId,
+          plugin: pluginId,
+          item: readKind,
+          app: t.app,
+          signal: scored.signal,
+        });
+        return json({
+          error: "challenge_pending",
+          challengeId: chal.challengeId,
+          message: "Read requires step-up approval. Poll /api/challenge/:id for status.",
+        }, 409);
+      }
+      if (scored.decision === "reject") {
+        await audit("stepup.rejected", { plugin: pluginId, item: readKind, app: t.app, signal: scored.signal });
+        return json({ error: "rejected", signal: scored.signal }, 403);
+      }
     }
     await audit("gate", { plugin: pluginId, readKind, decision: "allow", by });
     return null;
@@ -574,7 +630,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
-    const denied = await gateRead(t, plugin.id, "screenshot"); if (denied) return denied;
+    const denied = await gateRead(t, plugin.id, "screenshot", bearer); if (denied) return denied;
     const subj = t ? (t.subject ?? "owner") : "owner";
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
@@ -583,6 +639,10 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
     try {
       const shot = await browserScreenshot(browserSpiUrl, plugin, jar, target, browserSpiSecret);
+      // Record token use after successful read (marks first-use as consumed)
+      if (t && !isOwner(req)) {
+        recordTokenUse(bearer, plugin.id);
+      }
       await audit("screenshot", { plugin: plugin.id, url: target, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, url: target, ...shot });
     } catch (e) {
@@ -719,14 +779,22 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
-    const denied = await gateRead(t, plugin.id, "items"); if (denied) return denied;
+    const denied = await gateRead(t, plugin.id, "items", bearer); if (denied) return denied;
     // A scoped token reads its own subject's jar; the owner secret reads owner's.
     const subj = t ? (t.subject ?? "owner") : "owner";
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+
+    // Step-up gate now lives in gateRead at the read chokepoint (RFC 0005); first-use is
+    // cleared by recordTokenUse below only after a successful read.
+
     try {
       const data = m[2] ? await plugin.fetchItem(jar, decodeURIComponent(m[2])) : await plugin.listItems(jar);
+      // Record token use after successful read (marks first-use as consumed)
+      if (t && !isOwner(req)) {
+        recordTokenUse(bearer, plugin.id);
+      }
       await audit("read", { plugin: plugin.id, item: m[2] || "list", by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, data });
     } catch (e) {
