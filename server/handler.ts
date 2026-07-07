@@ -39,7 +39,7 @@ import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.
 import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot, browserFeed } from "./browser.ts";
 import { apiLike, apiMe, apiTimeline, apiTweet, apiUnlike, browserTrace } from "./twitter-actions.ts";
-import { scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
+import { pluginCapabilities, scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
 import { proposeIngredients } from "./promoter.ts";
 
 let ready = false;
@@ -433,7 +433,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   // the displayed claim is provably what's enforced at the gate (#73). An app fetching this
   // pre-approval has no token yet; the labels are not secret (they appear in gate 403s).
   if (req.method === "GET" && path === "/api/scopes") {
-    return json({ scopes: scopeIngredients() });
+    return json({ scopes: scopeIngredients(), plugins: pluginCapabilities() });
   }
   const scopeMatch = path.match(/^\/api\/scopes\/(.+)$/);
   if (req.method === "GET" && scopeMatch) {
