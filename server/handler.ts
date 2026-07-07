@@ -15,7 +15,7 @@
 
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
 import { deleteJar, getJar, initVault, jarStatus, setJar } from "./vault.ts";
-import { initTokens, listTokens, mint, revoke, verify, verifyCap } from "./tokens.ts";
+import { initTokens, listTokens, mint, revoke, type Token, verify, verifyCap } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit } from "./audit.ts";
 import { startScheduler } from "./scheduler.ts";
@@ -32,6 +32,7 @@ import { configureOtter } from "./plugins/otter.ts";
 import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.ts";
 import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot } from "./browser.ts";
+import { scopeLabel, scopeReads } from "./scopes.ts";
 
 let ready = false;
 let ownerSecret = "";
@@ -449,6 +450,23 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return html(approvePage(getConnect(ap[1]), ap[1]));
   }
 
+  // The read chokepoint — every scoped read passes here after auth and before the jar is
+  // touched. Two RFC seams at one point: (A) RFC 0003/0004 scope enforcement — a token
+  // carrying a scope-ingredient cap is confined to that ingredient's reads; owner + legacy
+  // tokens (no scope cap) are UNRESTRICTED (scopeReads → null); this is the dial actually
+  // enforced. (B) RFC 0005 step-up shell — log a risk line for every read (kind + who) so
+  // the chokepoint accrues an audit corpus; NO scoring/enforcement yet, just the seam.
+  async function gateRead(t: Token | null, pluginId: string, readKind: string): Promise<Response | null> {
+    const by = t ? (t.app || t.subject || "token") : "owner";
+    const allowed = scopeReads(t?.caps);
+    if (allowed && !allowed.has(readKind)) {
+      await audit("gate", { plugin: pluginId, readKind, decision: "deny", by });
+      return json({ error: `scope: this token may read ${[...allowed].join("+")} only, not ${readKind}`, scope: scopeLabel(t?.caps) }, 403);
+    }
+    await audit("gate", { plugin: pluginId, readKind, decision: "allow", by });
+    return null;
+  }
+
   // --- logged-in render via the Browser SPI (same vault jar as /items) ---
   const sc = path.match(/^\/api\/([a-z0-9-]+)\/screenshot$/);
   if (req.method === "GET" && sc) {
@@ -457,6 +475,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "screenshot"); if (denied) return denied;
     const subj = t ? (t.subject ?? "owner") : "owner";
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
@@ -480,6 +499,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "items"); if (denied) return denied;
     // A scoped token reads its own subject's jar; the owner secret reads owner's.
     const subj = t ? (t.subject ?? "owner") : "owner";
     const jar = getJar(subj, plugin.id);
