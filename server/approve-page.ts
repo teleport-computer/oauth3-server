@@ -24,6 +24,19 @@ export function approvePage(r: ConnectReq | undefined, id: string): string {
   // is provably what the gate enforces, never an app-authored string that can drift.
   const cap = pluginCapability(r.plugin);
   const capStmt = cap ? `<div class=note><b>What this token can do.</b> ${esc(cap.statement)}</div>` : "";
+  // RFC 0007 §1.4: friction-specific banner from the cached routeResult, rendered through the
+  // design tokens (never hardcoded hex). dev-mode/steer reuse the ink2 consent block; trivial
+  // is a neutral note; informed-tap renders nothing.
+  const friction = r.routeResult?.friction || "informed-tap";
+  const steerTo = r.routeResult?.steerTo;
+  const reason = r.routeResult?.reason || "";
+  const frictionBanner = friction === "dev-mode"
+    ? `<div class=consent><b>⚠ Dev-mode grant.</b> This request is broad and lacks verifiable attestation. You explicitly own this grant — it will be audited.</div>`
+    : friction === "steer" && steerTo
+    ? `<div class=consent><b>💡 Narrower scope available.</b> A reviewed <code>${esc(steerTo)}</code> scope exists for this plugin. Consider using that instead.</div>`
+    : friction === "trivial"
+    ? `<div class=note><b>✓ Low-risk grant.</b> This request has been verified — one-tap approval.</div>`
+    : ``;
   return `<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Approve access — OAuth3</title>
 <style>${DESIGN_CSS}
@@ -51,22 +64,27 @@ export function approvePage(r: ConnectReq | undefined, id: string): string {
   <b class=title>Authorize access</b>
   <div class=sub>An app is requesting scoped, revocable ${writes || jarCap ? "access" : "read access"} to your account.${writes || jarCap ? "" : " It never receives your raw cookies."}</div>
   ${capStmt}
+  ${frictionBanner}
   ${jarCap ? `<div class=consent><b>⚠ This app will receive your raw ${esc(r.plugin)} cookies</b> — the actual session credentials, not just a read. Only approve an app you trust to hold your session. Revocable at any time.</div>` : ""}
   ${writeEvents.map((e) => `<div class=consent><b>⚠ This app can EDIT event <code>${esc(e)}</code> on your ${esc(r.plugin)}.</b> A write action on your behalf, attenuated to that one event only — it cannot edit any other event, and only while this token is valid.</div>`).join("")}
   <div class=apphead><span class=label>requesting app</span><span class=appname>${esc(r.app || "(unnamed app)")}</span></div>
-  <div class=row><span class=k>${writes ? "writes" : "reads"}</span><span class=v><span class=chip>${esc(r.plugin)}</span></span></div>
+  <div class=row><span class=k>${writes ? "writes" : "reads"}</span><span class=v><span class=chip>${esc(r.plugin)}</span>${r.scope ? ` <span class=chip>${esc(r.scope)}</span>` : ""}</span></div>
   ${r.subject ? `<div class=row><span class=k>attributed to</span><span class=v>${esc(r.subject)}</span></div>` : ""}
+  ${reason ? `<div class=row><span class=k>check</span><span class=v>${esc(reason)}</span></div>` : ""}
   <div class=row><span class=k>status</span><span class=v><span id=status>${esc(r.status)}</span></span></div>
   ${decided ? "" : `<div id=actions></div>`}
   <div id=msg></div>
 </div>
 <script>
  const id=${JSON.stringify(id)};
+ const routeResult=${JSON.stringify(r.routeResult)};
  const SK='oauth3_session';
  const authHdr=()=>{const t=localStorage.getItem(SK);return t?{Authorization:'Bearer '+t}:{}};
  const msg=(t,ok)=>{const m=document.getElementById('msg');m.textContent=t;m.style.color=ok?'var(--i1-text)':'var(--i2-text)'};
- async function act(kind){
-   const r=await fetch('../api/connect/'+id+'/'+kind,{method:'POST',headers:{'Content-Type':'application/json',...authHdr()},body:'{}'});
+ async function act(kind,useSteer=false){
+   const body={};
+   if(useSteer) body.steer=kind;
+   const r=await fetch('../api/connect/'+id+'/'+kind,{method:'POST',headers:{'Content-Type':'application/json',...authHdr()},body:JSON.stringify(body)});
    const b=await r.json().catch(()=>({}));
    if(!r.ok){msg(b.error||('failed: '+r.status),false);return}
    document.getElementById('status').textContent=b.status;
@@ -78,8 +96,27 @@ export function approvePage(r: ConnectReq | undefined, id: string): string {
    const actions=document.getElementById('actions');
    if(!actions) return;
    if(me.signedIn){
-     actions.innerHTML='<div class=acts><button class="btn approve">Approve</button><button class="btn ghost deny">Deny</button></div>';
-     actions.querySelector('.approve').onclick=()=>act('approve');
+     // RFC 0007 §1.4: friction-conditional buttons. steer offers the reviewed narrow scope
+     // first (POSTs {scope:<steerTo>} then approves); dev-mode labels the affordance loudly.
+     const friction=routeResult?.friction;
+     const steerTo=routeResult?.steerTo;
+     let btnHtml='';
+     if(friction==='steer' && steerTo){
+       btnHtml='<div class=acts><button class="btn approve" id=steerBtn></button><button class="btn approve" id=reqBtn>Use requested scope</button><button class="btn ghost deny">Deny</button></div>';
+     } else if(friction==='dev-mode'){
+       btnHtml='<div class=acts><button class="btn approve">Approve (dev-mode)</button><button class="btn ghost deny">Deny</button></div>';
+     } else {
+       btnHtml='<div class=acts><button class="btn approve">Approve</button><button class="btn ghost deny">Deny</button></div>';
+     }
+     actions.innerHTML=btnHtml;
+     if(friction==='steer' && steerTo){
+       const steerBtn=document.getElementById('steerBtn');
+       steerBtn.textContent='Use '+steerTo+' (recommended)';
+       steerBtn.onclick=()=>{fetch('../api/connect/'+id+'/approve',{method:'POST',headers:{'Content-Type':'application/json',...authHdr()},body:JSON.stringify({scope:steerTo})}).then(()=>act('approve',true))};
+       document.getElementById('reqBtn').onclick=()=>act('approve');
+     } else {
+       actions.querySelector('.approve').onclick=()=>act('approve');
+     }
      actions.querySelector('.deny').onclick=()=>act('deny');
    } else {
      actions.innerHTML='<a class="btn signin" href="../login?return='+encodeURIComponent(location.href)+'">Sign in to approve →</a>';

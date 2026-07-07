@@ -25,6 +25,8 @@ import { initTokens, listTokens, mint, revoke, type Token, verify, verifyCap } f
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit } from "./audit.ts";
 import { formatAuditDecision, gate, Scope, STATIC_LISTING } from "./listing.ts";
+import { getListings, initListings } from "./listings.ts";
+import { initEval, logEval, updateEvalOutcome } from "./eval.ts";
 import { startScheduler } from "./scheduler.ts";
 import { approvePage } from "./approve-page.ts";
 import { appPage } from "./app-page.ts";
@@ -62,6 +64,8 @@ async function init(env: Record<string, string>, dataDir: string) {
   await initPasskeys(dataDir);
   await initLinks(dataDir);
   configureOtter(env);
+  await initListings(dataDir);
+  await initEval(dataDir);
   ownerSecret = env.OWNER_SECRET || env.OAUTH3_OWNER_SECRET || env.EXT_SHARED_SECRET || "";
   publicUrl = (env.PUBLIC_URL || "").replace(/\/$/, "");
   browserSpiUrl = (env.BROWSER_SPI_URL || "").replace(/\/$/, "");
@@ -376,6 +380,11 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     });
   }
 
+  // RFC 0007 §5.2: listing store
+  if (req.method === "GET" && path === "/api/listings") {
+    return json({ listings: getListings() });
+  }
+
   if (req.method === "POST" && path === "/api/cookies") {
     const subj = subjectOf();
     if (!subj) return json({ error: "unauthorized" }, 401);
@@ -420,6 +429,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!isOwner(req) && !session) return json({ error: "unauthorized" }, 401);
     const ok = await revoke(decodeURIComponent(tok[1]));
     await audit("token.revoke", { token: tok[1].slice(0, 16), found: ok });
+    // RFC 0007 §4.1: log revocation outcome (we don't have app/plugin here, so skip)
     return json({ ok, revoked: ok });
   }
 
@@ -486,10 +496,22 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
 
     // Allowed by the listing gate: proceed to layer-2 grant. caps (e.g. "jar",
     // "write:event:<id>") are surfaced on the approve page for informed consent; the minted
-    // token only carries them after the owner approves.
+    // token only carries them after the owner approves. scope/attestation feed the RFC 0007
+    // routing decision (friction) cached on the request for the approve page to render.
     const caps = Array.isArray(body?.caps) ? body.caps.filter((c: unknown) => typeof c === "string") : undefined;
-    const r = await createConnect(body.plugin, body.subject, body.app, caps);
-    await audit("connect.request", { plugin: r.plugin, app: r.app, caps: r.caps, requestId: r.requestId });
+    const r = await createConnect(body.plugin, body.subject, body.app, caps, body.scope, body.attestation);
+    await audit("connect.request", { plugin: r.plugin, app: r.app, caps: r.caps, requestId: r.requestId, scope: r.scope, friction: r.routeResult?.friction });
+    // RFC 0007 §4.1: log eval entry at request time
+    await logEval({
+      ts: Date.now(),
+      app: r.app || r.requestId,
+      plugin: r.plugin,
+      scope: r.scope,
+      statement: "(pending)", // filled when listing is resolved
+      workflow: "llm-judge", // phase 1 default
+      decision: "discharged", // the layer-1 gate only lets listed requests through
+      friction: (r.routeResult?.friction || "informed-tap") as any,
+    });
     return json({ requestId: r.requestId, approveUrl: `${origin}/approve/${r.requestId}` });
   }
   const conn = path.match(/^\/api\/connect\/([^/]+)(?:\/(approve|deny))?$/);
@@ -506,6 +528,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       const r = action === "approve" ? await approveConnect(id, approver) : await denyConnect(id);
       if (!r) return json({ error: "unknown or already-decided request" }, 404);
       await audit(`connect.${action}`, { subject: approver, plugin: r.plugin, app: r.app, requestId: id });
+      // RFC 0007 §4.1: fill outcome when user decides
+      await updateEvalOutcome(r.app || id, r.plugin, action === "approve" ? "approved" : "denied");
       return json({ ok: true, status: r.status });
     }
   }
