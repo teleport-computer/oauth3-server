@@ -25,6 +25,10 @@ export interface Plugin {
   // Optional binary frame proxy: fetch one site-CDN image with the jar (the app can't
   // reach the CDN itself — it only holds a scoped token, never the cookie).
   fetchFrame?(jar: Jar, url: string): Promise<{ bytes: Uint8Array; contentType: string }>;
+  // Optional write primitive (the edit-on-behalf surface). Symmetric with fetchItem.
+  // Gated at the handler by owner OR a structured cap (e.g. write:event:<id>); plugins
+  // that don't expose writes leave this undefined.
+  editItem?(jar: Jar, id: string, patch: unknown): Promise<unknown>;
 }
 
 export function cookieHeader(jar: Jar): string {

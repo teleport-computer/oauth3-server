@@ -6,6 +6,9 @@
 //   GET    /api/tokens                        owner — list tokens
 //   DELETE /api/tokens/:token                 owner — revoke a token
 //   GET    /api/audit                         owner — audit log
+//   GET    /api/promote                       owner — proposed scope ingredients from observed reads
+//   GET    /api/scopes                        public — enforced scope-ingredient ledger (label = shown scope)
+//   GET    /api/scopes/:id                    public — one enforced ingredient (404 if unknown)
 //   POST   /api/connect   {plugin,subject?,app?}   app — start the grant handshake
 //   GET    /api/connect/:requestId            app — poll status (token once approved)
 //   POST   /api/connect/:requestId/approve|deny  owner_secret — the user's decision
@@ -18,7 +21,7 @@
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
 import { configureEgress, egressFetch, egressProxy } from "./egress.ts";
 import { deleteJar, getJar, initVault, jarStatus, setJar } from "./vault.ts";
-import { initTokens, listTokens, mint, revoke, verify, verifyCap } from "./tokens.ts";
+import { initTokens, listTokens, mint, revoke, type Token, verify, verifyCap } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit } from "./audit.ts";
 import { startScheduler } from "./scheduler.ts";
@@ -36,6 +39,8 @@ import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.
 import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot, browserFeed } from "./browser.ts";
 import { apiLike, apiMe, apiTimeline, apiTweet, apiUnlike, browserTrace } from "./twitter-actions.ts";
+import { scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
+import { proposeIngredients } from "./promoter.ts";
 
 let ready = false;
 let ownerSecret = "";
@@ -119,6 +124,28 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   if (req.method === "GET" && path === "/privacy") return html(privacyPage(ctx.env));
   if (req.method === "GET" && path === "/terms") return html(termsPage(ctx.env));
   if (req.method === "GET" && path === "/evidence") return html(evidencePage(ctx.env));
+
+  // User journeys test report — static HTML from disk if available.
+  if (req.method === "GET" && (path === "/journeys" || path === "/journeys/")) {
+    const journeysPath = (ctx.dataDir || ".") + "/journeys/index.html";
+    try {
+      const journeysHtml = await Deno.readTextFile(journeysPath);
+      return html(journeysHtml);
+    } catch {
+      return html("<html><body><h1>User Journeys Report</h1><p>Report not found at " + journeysPath + "</p></body></html>");
+    }
+  }
+  // Admin endpoint to update the journeys report (owner secret required).
+  if (req.method === "POST" && path === "/api/journeys") {
+    if (!isOwner(req)) return json({ error: "unauthorized" }, 401);
+    const html = await req.text();
+    const journeysDir = (ctx.dataDir || ".") + "/journeys";
+    const journeysPath = journeysDir + "/index.html";
+    await Deno.mkdir(journeysDir, { recursive: true });
+    await Deno.writeTextFile(journeysPath, html);
+    await audit("journeys.update", {});
+    return json({ ok: true, path: journeysPath });
+  }
 
   // The instance's own demo app — open it with the extension, no sign-in.
   // ?plugin=<id> picks which adapter to demo (default otter).
@@ -401,10 +428,35 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return json({ audit: subj === "owner" ? all : all.filter((e) => (e.detail as { subject?: string } | undefined)?.subject === subj) });
   }
 
+  // The enforced scope-ingredient ledger, public + read-only (RFC 0004 — closure-can't-drift):
+  // the scope sentence shown to a user MUST come from here, not an app-authored string, so
+  // the displayed claim is provably what's enforced at the gate (#73). An app fetching this
+  // pre-approval has no token yet; the labels are not secret (they appear in gate 403s).
+  if (req.method === "GET" && path === "/api/scopes") {
+    return json({ scopes: scopeIngredients() });
+  }
+  const scopeMatch = path.match(/^\/api\/scopes\/(.+)$/);
+  if (req.method === "GET" && scopeMatch) {
+    const id = decodeURIComponent(scopeMatch[1]);
+    const ing = scopeIngredient(id);
+    return ing ? json(ing) : json({ error: `unknown scope ingredient: ${id}` }, 404);
+  }
+
+  // The 4th self-improvement loop (#72): cluster the gate-allow audit events per app/plugin
+  // and PROPOSE named scope ingredients (entries for scopes.ts) capturing exactly what each
+  // app was observed reading. Owner-only: it reads everyone's audit trail. Output is the
+  // decision doc for curating a new ingredient (name/label are drafts; a human finalizes).
+  if (req.method === "GET" && path === "/api/promote") {
+    if (!isOwner(req)) return json({ error: "unauthorized" }, 401);
+    return json({ proposals: proposeIngredients(auditLog()) });
+  }
+
   // --- connect / approval ---
   if (req.method === "POST" && path === "/api/connect") {
     const body = await req.json().catch(() => null) as any;
     if (!getPlugin(body?.plugin)) return json({ error: "unknown plugin" }, 404);
+    // caps (e.g. "jar", "write:event:<id>") are surfaced on the approve page for informed
+    // consent; the minted token only carries them after the owner approves.
     const caps = Array.isArray(body?.caps) ? body.caps.filter((c: unknown) => typeof c === "string") : undefined;
     const r = await createConnect(body.plugin, body.subject, body.app, caps);
     await audit("connect.request", { plugin: r.plugin, app: r.app, caps: r.caps, requestId: r.requestId });
@@ -468,6 +520,23 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     }
   }
 
+  // The read chokepoint — every scoped read passes here after auth and before the jar is
+  // touched. Two RFC seams at one point: (A) RFC 0003/0004 scope enforcement — a token
+  // carrying a scope-ingredient cap is confined to that ingredient's reads; owner + legacy
+  // tokens (no scope cap) are UNRESTRICTED (scopeReads → null); this is the dial actually
+  // enforced. (B) RFC 0005 step-up shell — log a risk line for every read (kind + who) so
+  // the chokepoint accrues an audit corpus; NO scoring/enforcement yet, just the seam.
+  async function gateRead(t: Token | null, pluginId: string, readKind: string): Promise<Response | null> {
+    const by = t ? (t.app || t.subject || "token") : "owner";
+    const allowed = scopeReads(t?.caps);
+    if (allowed && !allowed.has(readKind)) {
+      await audit("gate", { plugin: pluginId, readKind, decision: "deny", by });
+      return json({ error: `scope: this token may read ${[...allowed].join("+")} only, not ${readKind}`, scope: scopeLabel(t?.caps) }, 403);
+    }
+    await audit("gate", { plugin: pluginId, readKind, decision: "allow", by });
+    return null;
+  }
+
   // --- logged-in render via the Browser SPI (same vault jar as /items) ---
   const sc = path.match(/^\/api\/([a-z0-9-]+)\/screenshot$/);
   if (req.method === "GET" && sc) {
@@ -476,6 +545,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "screenshot"); if (denied) return denied;
     const subj = t ? (t.subject ?? "owner") : "owner";
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
@@ -620,6 +690,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "items"); if (denied) return denied;
     // A scoped token reads its own subject's jar; the owner secret reads owner's.
     const subj = t ? (t.subject ?? "owner") : "owner";
     const jar = getJar(subj, plugin.id);
@@ -629,6 +700,41 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       const data = m[2] ? await plugin.fetchItem(jar, decodeURIComponent(m[2])) : await plugin.listItems(jar);
       await audit("read", { plugin: plugin.id, item: m[2] || "list", by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, data });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  // --- google-calendar event-scoped WRITE (RFC: edit-on-behalf, attenuated to one event).
+  // The owner may always edit; a delegated app may edit ONE event only if its token carries
+  // the structured cap "write:event:<eventId>". verifyCap rejects any other event id (exact
+  // string match — "write:event:A" does not satisfy "write:event:B") and rejects read-only
+  // tokens. Every write attempt is audited, authorized or not. The actual session write
+  // against calendar.google.com is captured from a live trajectory (operator-run, #69); until
+  // then plugin.editItem throws an honest error rather than assuming an endpoint. ---
+  const gcEvt = path.match(/^\/api\/google-calendar\/event\/([^/]+)$/);
+  if (req.method === "POST" && gcEvt) {
+    const eventId = decodeURIComponent(gcEvt[1]);
+    const plugin = getPlugin("google-calendar");
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const cap = `write:event:${eventId}`;
+    const t = verifyCap(bearer, "google-calendar", cap);
+    if (!isOwner(req) && !t) {
+      await audit("google-calendar.event.edit.denied", { eventId, reason: "unauthorized" });
+      return json({ error: `unauthorized — token must carry ${cap}` }, 401);
+    }
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const by = t ? (t.app || t.subject || "token") : "owner";
+    const body = await req.json().catch(() => null) as { changes?: unknown } | null;
+    const jar = getJar(subj, "google-calendar");
+    if (!jar) return json({ error: "no jar synced for google-calendar" }, 409);
+    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    await audit("google-calendar.event.edit", { eventId, subject: subj, by });
+    if (!plugin.editItem) return json({ error: "plugin does not expose writes" }, 501);
+    try {
+      const result = await plugin.editItem(jar, eventId, body?.changes);
+      return json({ ok: true, plugin: "google-calendar", eventId, result });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
     }

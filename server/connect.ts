@@ -10,7 +10,7 @@ export interface ConnectReq {
   plugin: string;
   subject?: string;
   app?: string;
-  caps?: string[]; // requested capabilities (e.g. "jar"); surfaced on the approve page for consent
+  caps?: string[]; // requested capabilities (e.g. "jar", "write:event:<id>"); surfaced on the approve page for consent
   status: "pending" | "approved" | "denied";
   token?: string;
   createdAt: number;
@@ -44,6 +44,8 @@ export function getConnect(id: string): ConnectReq | undefined { return reqs[id]
 export async function approveConnect(id: string, approver: string): Promise<ConnectReq | null> {
   const r = reqs[id];
   if (!r || r.status !== "pending") return null;
+  // The minted token carries the requested caps (e.g. write:event:<id>) only after the
+  // approver sees them on the consent screen — informed consent for a write capability.
   const t = await mint(r.plugin, approver, r.app, r.caps);
   r.status = "approved";
   r.token = t.token;

@@ -116,5 +116,16 @@ federation `verify` pin), **E2E-verified in a container with real Otter** (333 t
 Not yet: live-verified Otter field names, secret delivery to isolated deno (ISSUES.md #13),
 external data volume, attestation-pinning in the extension, token revocation, audit log.
 
+## Docs
+
+Reference documentation lives in [`docs/`](docs/):
+
+- [`docs/http-api.md`](docs/http-api.md) — every endpoint: method, path, auth required, request/response shapes, errors, plus a journey→endpoint map.
+- [`docs/auth.md`](docs/auth.md) — the auth model in one place: owner secret vs web session vs scoped token, and which endpoints accept which.
+- [`docs/plugins.md`](docs/plugins.md) — authoring a plugin: the `Plugin` interface, how scoped-fetch constrains it, the copy-fill-register pattern.
+- [`docs/operator.md`](docs/operator.md) — operator guide: local dev, tee-daemon deploy, the dev / source-bound / attested trust postures, evidence verification, and seeding a jar.
+
+## Status
+
 See [ROADMAP.md](ROADMAP.md) for the success condition and the milestone breakdown
 (issue-shaped — mirror into GitHub issues once the repos are pushed).

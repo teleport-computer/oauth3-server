@@ -1,0 +1,112 @@
+// Read-scope gate — the credential dial actually enforced at the handler chokepoint.
+// These tests pin the security property: a token carrying a scope-ingredient cap is
+// confined to that ingredient's reads, while owner + every legacy token (no scope cap)
+// stay UNRESTRICTED (backward compatible). Pure-logic tests on scopeReads/scopeLabel,
+// plus an in-process handler test mirroring tokens_test.ts (dataDir:"" = in-memory).
+
+import { assert, assertEquals } from "jsr:@std/assert";
+import { scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
+import { mint } from "./tokens.ts";
+import handler from "./handler.ts";
+
+// --- pure logic ---
+
+// No scope-ingredient cap => unrestricted (owner + every legacy token). Backward compat.
+Deno.test("scopeReads: no scope cap is unrestricted (null)", () => {
+  assertEquals(scopeReads(undefined), null);
+  assertEquals(scopeReads([]), null);
+  assertEquals(scopeReads(["jar"]), null); // an unrelated cap is not a scope ingredient
+});
+
+// A scope-ingredient cap confines the token to that ingredient's reads.
+Deno.test("scopeReads: otter:live-follow confines to live+frame", () => {
+  const r = scopeReads(["otter:live-follow"])!;
+  assert(r !== null);
+  assert(r.has("live"), "live is in scope -> gate passes");
+  assert(r.has("frame"), "frame is in scope -> gate passes");
+  assert(!r.has("items"), "items is out of scope -> gate denies (the money shot)");
+  assert(!r.has("screenshot"), "screenshot out of scope -> gate denies");
+});
+
+// Union across ingredients (composability); non-ingredient caps ignored.
+Deno.test("scopeReads: union + non-ingredient caps ignored", () => {
+  const r = scopeReads(["otter:live-follow", "jar"])!;
+  assertEquals([...r].sort(), ["frame", "live"]);
+});
+
+Deno.test("scopeLabel: surfaces the human dial only for ingredients", () => {
+  assertEquals(scopeLabel([]), "");
+  assertEquals(scopeLabel(["jar"]), "");
+  assert(scopeLabel(["otter:live-follow"]).includes("the current live meeting"));
+});
+
+// --- in-process handler gating (no jar synced => a request that PASSES the gate stops
+// at 409 "no jar"; a request DENIED by scope stops at 403 before the jar is touched) ---
+Deno.test("handler GET /api/otter/items — read-scope gating", async () => {
+  const OWNER = "test-owner-secret-scope";
+  const ctx = { env: { OWNER_SECRET: OWNER }, dataDir: "" }; // in-memory: no scheduler, no SEAL_KEY
+  const scoped = await mint("otter", "owner", "scopetest", ["otter:live-follow"]);
+  const legacy = await mint("otter", "owner", "reader-app"); // no caps
+
+  const get = (path: string, bearer: string) =>
+    handler(
+      new Request(`http://localhost${path}`, { headers: { Authorization: `Bearer ${bearer}` } }),
+      ctx,
+    );
+
+  // The money shot: a live-follow token may not read the conversation list.
+  assertEquals((await get("/api/otter/items", scoped.token)).status, 403);
+  // ...nor render a screenshot — screenshot is also out of scope.
+  assertEquals((await get("/api/otter/screenshot", scoped.token)).status, 403);
+  // Backward compat: a legacy (no-cap) token passes the gate -> 409 no jar (NOT 403).
+  assertEquals((await get("/api/otter/items", legacy.token)).status, 409);
+  // Owner is unrestricted -> passes the gate -> 409 no jar (NOT 403).
+  assertEquals((await get("/api/otter/items", OWNER)).status, 409);
+});
+
+// --- /api/scopes: the enforced-ingredient ledger is what the UX layer must render (#73).
+// The shown scope sentence can't drift from what's enforced because the receipt FETCHES the
+// label from here instead of using an app-authored string. Public + read-only.
+Deno.test("scopeIngredients: surfaces the enforced ledger with ids", () => {
+  const all = scopeIngredients();
+  const live = all.find((i) => i.id === "otter:live-follow")!;
+  assert(live, "otter:live-follow is seeded");
+  assertEquals(live.plugin, "otter");
+  assertEquals([...live.reads].sort(), ["frame", "live"]);
+  assert(live.label.includes("the current live meeting"), "label is the enforced sentence");
+});
+
+Deno.test("scopeIngredient: exact enforced record by id; undefined when unknown", () => {
+  const live = scopeIngredient("otter:live-follow")!;
+  assertEquals(live.id, "otter:live-follow");
+  assertEquals(live.plugin, "otter");
+  assertEquals(scopeIngredient("nope:not-real"), undefined);
+});
+
+// In-process handler: the ledger is reachable unauthenticated (an app about to ask for
+// consent has no token yet), and the single-ingredient fetch returns the EXACT enforced
+// label — the non-drift property a receipt relies on.
+Deno.test("handler GET /api/scopes(+/:id) — public, exact enforced label", async () => {
+  const ctx = { env: {}, dataDir: "" }; // no OWNER_SECRET — proves these are public
+  const get = (p: string) => handler(new Request(`http://localhost${p}`), ctx);
+
+  const list = await get("/api/scopes");
+  assertEquals(list.status, 200);
+  const listBody = await list.json();
+  const live = listBody.scopes.find((i: { id: string }) => i.id === "otter:live-follow");
+  assert(live, "ledger lists otter:live-follow");
+  assert(live.label.includes("the current live meeting"));
+
+  // The verify bullet from the issue: GET /api/scopes/otter:live-follow returns the exact
+  // enforced label (and the reads that back the #71 403 behavior).
+  const one = await get("/api/scopes/otter:live-follow");
+  assertEquals(one.status, 200);
+  const oneBody = await one.json();
+  assertEquals(oneBody.id, "otter:live-follow");
+  assertEquals(oneBody.plugin, "otter");
+  assertEquals([...oneBody.reads as string[]].sort(), ["frame", "live"]);
+  assert((oneBody.label as string).includes("the current live meeting"));
+
+  // Unknown ingredient -> 404 (no drift to a made-up label).
+  assertEquals((await get("/api/scopes/nope:not-real")).status, 404);
+});

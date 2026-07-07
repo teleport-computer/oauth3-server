@@ -112,3 +112,21 @@ Smoothness: ● smooth · ◑ ok, has friction · ○ rough/manual · ◌ not bu
 First end-to-end target = **otter-importer across J1→J2→J3→J4** (the north-star) — **done**,
 verified live (#1–#5 closed). Next milestone: the browser worker (J5) and the app-store
 approver (J7).
+
+---
+
+## Journey → endpoint map
+
+Each journey's endpoints/surface, with the verification evidence today. There is **no
+automated test suite** yet — verification is the live end-to-end markers above (M1) plus
+`deno check server/main.ts`. Full endpoint reference: [`docs/http-api.md`](docs/http-api.md).
+
+| journey | endpoints / surface |
+|---|---|
+| **J1** no-install cookie read | `POST /api/cookies` → `POST /api/tokens` → `GET /api/:plugin/items` (CLI: `cli sync/token/read`) |
+| **J2** extension ingest | `POST /api/cookies` (extension auto-syncs on cookie-change + 30m) |
+| **J3** connect & grant | `POST /api/connect` → `GET /approve/:id` (user) / `POST /api/connect/:id/approve` → `GET /api/connect/:id` (poll) → `GET /api/:plugin/items` (token) → `DELETE /api/tokens/:token` |
+| **J4** app delivers value | same as J3; the app holds only the `tok-…` |
+| **J5** browser capture | `GET /api/:plugin/screenshot` (Browser SPI; worker unbuilt — M2) |
+| **J6** add a site | the [`Plugin` interface](docs/plugins.md) + `registry.ts` (no endpoint) |
+| **J7** app gets listed | not built (#6) |

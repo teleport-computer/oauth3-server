@@ -31,7 +31,7 @@ export function apiMe(jar: Jar): unknown {
 }
 
 export async function apiTimeline(jar: Jar, count = 20): Promise<unknown[]> {
-  const tl = await (await rettiwtFromJar(jar)).user.timeline(count);
+  const tl = await (await rettiwtFromJar(jar)).user.timeline(undefined, count);
   return (tl?.list ?? []).map((t: any) => ({ id: t.id, text: t.fullText, author: t.tweetBy?.userName }));
 }
 

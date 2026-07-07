@@ -8,7 +8,7 @@ export interface Token {
   plugin: string;
   subject?: string;
   app?: string;
-  caps?: string[]; // extra capabilities beyond read (e.g. "jar" = raw-jar release)
+  caps?: string[]; // extra capabilities beyond read (e.g. "jar" = raw-jar release, "write:event:<id>" = one-event edit)
   createdAt: number;
   revokedAt?: number;
 }
@@ -41,7 +41,11 @@ export function verify(token: string, plugin: string): Token | null {
   return t && t.plugin === plugin && !t.revokedAt ? t : null;
 }
 
-// Like verify, but also requires the token to carry a specific capability.
+// Like verify, but also requires the token to carry a specific capability string.
+// Cap strings are exact (no globbing): "write:event:A" does NOT satisfy "write:event:B",
+// so an event-scoped write cap attenuates to exactly one event id. A read-only token
+// (no caps) is rejected for any capability. Used by the google-calendar write endpoint.
+// Returns the token when satisfied, else null.
 export function verifyCap(token: string, plugin: string, cap: string): Token | null {
   const t = verify(token, plugin);
   return t && t.caps?.includes(cap) ? t : null;
