@@ -13,6 +13,12 @@ export const SCOPE_INGREDIENTS: Record<string, { plugin: string; reads: string[]
       label:
         "read-only · the current live meeting · not your conversation list, transcript text, or recap",
     },
+    "reddit:karma": {
+      plugin: "reddit",
+      reads: ["account"],
+      label:
+        "read-only · your Reddit account identity (username) and karma (comment + link) · not your saved posts, feed, votes, or messages",
+    },
   };
 
 // Per-plugin capability statements (RFC 0009 step 1) — the operator-authored sentence shown
@@ -34,7 +40,7 @@ export const PLUGIN_CAPABILITIES: Record<string, { plugin: string; statement: st
   reddit: {
     plugin: "reddit",
     statement:
-      "CAN read your saved posts and comments (and each item's full body/url) and a logged-in screenshot of reddit.com. CANNOT save, vote, post, comment, or edit.",
+      "CAN read your saved posts and comments (and each item's full body/url), your account identity and karma (comment + link), and a logged-in screenshot of reddit.com. CANNOT save, vote, post, comment, or edit.",
   },
   nytimes: {
     plugin: "nytimes",
