@@ -84,3 +84,23 @@ allocator discipline: cheap conservative default, spend autonomy only where the 
 - Acting on any participant's speech other than the operator's.
 - Publishing transcript content beyond the minimized provenance quote.
 - Replacing operator-filed issues; this adds a source, it does not gate one.
+
+## Lessons from the first live run (2026-07-09 — operator grade: C)
+The pipeline ran the same day this RFC was drafted: one spoken request ("Reddit karma
+indicator") became two provenance-cited issues, survived the veto window, was built by two
+chips, auto-merged, and reached a working deployed app. The grade is a C, not an A, for
+reasons that are now requirements:
+
+1. **Acceptance must be user-observable.** The mined issues carried no success condition, so
+   the workers' "done" was PR-merged — the app then sat at 404, and later showed mock data,
+   both technically "complete." Mined issues now REQUIRE an `## Acceptance` section (what a
+   person sees, at what URL, after what action) and an `## Operator steps` section naming
+   anything the swarm cannot do itself. This is td-0030's rule applied at intake time.
+2. **One utterance, two repos, no contract.** The app chip and the plugin chip invented
+   different endpoint names (`/karma` vs `/account`). When one utterance yields tasks in
+   multiple repos, the intake must state the interface contract identically in every issue.
+3. **Merged ≠ deployed ≠ working.** Merges changed nothing a user could see until an agent
+   hand-deployed twice. A post-merge deploy lane for registered static apps is filed; until
+   it lands, `## Operator steps` must name the deploy.
+4. Human hands were needed at four points: core promotion (correct — by design), two app
+   deploys (gap #3), and the contract fix (gap #2). Only the first should survive.
