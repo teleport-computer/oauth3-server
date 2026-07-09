@@ -11,6 +11,20 @@ export interface PluginItem {
   meta?: Record<string, unknown>;
 }
 
+// Account-level data — identity + named stats for the logged-in account (e.g. Reddit
+// username + karma breakdown). The narrow renderable surface behind a scope ingredient
+// like `reddit:karma`; returned by GET /api/:plugin/account.
+export interface PluginAccountField {
+  key: string; // stable machine key, e.g. "comment_karma"
+  label: string; // human label, e.g. "Comment karma"
+  value: string | number;
+}
+export interface PluginAccount {
+  id: string; // stable account id (e.g. reddit username)
+  label: string; // human label, e.g. "u/spez"
+  fields: PluginAccountField[]; // ordered named account fields (e.g. karma breakdown)
+}
+
 export interface Plugin {
   id: string; // url-safe, e.g. "otter"
   label: string; // human, e.g. "ShapeRotator (Otter.ai)"
@@ -19,6 +33,10 @@ export interface Plugin {
   loggedIn(jar: Jar): boolean; // cheap presence check on a key cookie
   listItems(jar: Jar): Promise<PluginItem[]>;
   fetchItem(jar: Jar, id: string): Promise<unknown>;
+  // Optional account-level read: identity + stats for the logged-in account (e.g. Reddit
+  // username + karma breakdown). The narrow surface behind a scope ingredient like
+  // `reddit:karma`. Gated at the handler's read chokepoint (readKind "account") like /items.
+  account?(jar: Jar): Promise<PluginAccount>;
   // Optional live-follow surface: the currently-live item's recent segments (with
   // monotonic `order` for incremental polling) plus any shared-screen frames.
   live?(jar: Jar, after: number): Promise<unknown>;

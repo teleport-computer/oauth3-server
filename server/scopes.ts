@@ -13,6 +13,12 @@ export const SCOPE_INGREDIENTS: Record<string, { plugin: string; reads: string[]
       label:
         "read-only · the current live meeting · not your conversation list, transcript text, or recap",
     },
+    "reddit:karma": {
+      plugin: "reddit",
+      reads: ["account"],
+      label:
+        "read-only · your Reddit account identity (username) and karma (comment + link) · not your saved posts, feed, votes, or messages",
+    },
   };
 
 // The enforced ingredient ledger, surfaced for the UX layer (RFC 0004 — closure-can't-drift):
