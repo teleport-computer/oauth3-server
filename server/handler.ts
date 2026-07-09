@@ -13,6 +13,7 @@
 //   GET    /api/connect/:requestId            app — poll status (token once approved)
 //   POST   /api/connect/:requestId/approve|deny  owner_secret — the user's decision
 //   GET    /approve/:requestId                HTML approval screen
+//   GET    /api/:plugin/account              scoped token OR owner — account-level data (identity + karma)
 //   GET    /api/:plugin/items[/:id]           scoped token OR owner — read
 //   GET    /api/:plugin/live[?after=N]        scoped token OR owner — live item segments + frame urls
 //   GET    /api/:plugin/frame?u=<b64url>      scoped token OR owner — proxy one shared-screen image (binary)
@@ -38,6 +39,7 @@ import { newChallenge, verifyDidSignIn } from "./identity.ts";
 import { allCredentialIds, credentialsFor, initPasskeys, passkeyChallenge, verifyAuthentication, verifyRegistration } from "./passkey.ts";
 import { consumeState, enabledProviders, githubAuthUrl, githubEnv, githubExchange, googleAuthUrl, googleEnv, googleExchange, newState } from "./oidc.ts";
 import { configureOtter } from "./plugins/otter.ts";
+import { configureReddit } from "./plugins/reddit.ts";
 import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.ts";
 import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot, browserFeed } from "./browser.ts";
@@ -64,6 +66,7 @@ async function init(env: Record<string, string>, dataDir: string) {
   await initPasskeys(dataDir);
   await initLinks(dataDir);
   configureOtter(env);
+  configureReddit(env);
   await initListings(dataDir);
   await initEval(dataDir);
   ownerSecret = env.OWNER_SECRET || env.OAUTH3_OWNER_SECRET || env.EXT_SHARED_SECRET || "";
@@ -374,7 +377,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const subj = subjectOf(); // jar status is per-identity; anonymous sees none present
     return json({
       plugins: allPlugins().map((p) => ({
-        id: p.id, label: p.label, cookieDomains: p.cookieDomains,
+        id: p.id, label: p.label, cookieDomains: p.cookieDomains, account: !!p.account,
         jar: subj ? jarStatus(subj, p.id) : { present: false, updatedAt: 0, count: 0 },
       })),
     });
@@ -821,6 +824,33 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       }
       await audit("read", { plugin: plugin.id, item: m[2] || "list", by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, data });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  // --- account-level data (scoped token or owner): identity + stats for the logged-in
+  // account. For reddit this is the account's karma (comment + link + total) — the read
+  // behind the `reddit:karma` scope ingredient. Same chokepoint as /items (readKind
+  // "account"), so a karma-scoped token is confined to this and cannot read saved posts. ---
+  const acc = path.match(/^\/api\/([a-z0-9-]+)\/account$/);
+  if (req.method === "GET" && acc) {
+    const plugin = getPlugin(acc[1]);
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    if (!plugin.account) return json({ error: `${plugin.id} has no account view` }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verify(bearer, plugin.id);
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "account", bearer); if (denied) return denied;
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const jar = getJar(subj, plugin.id);
+    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    try {
+      const data = await plugin.account(jar);
+      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      await audit("account", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
+      return json({ plugin: plugin.id, account: data });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
     }
