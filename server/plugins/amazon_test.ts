@@ -58,6 +58,31 @@ Deno.test("amazon cart: parseCart extracts line items with title/price/qty", () 
   assertEquals(lines[2], { asin: "B09MAPLE01", title: "Pure Maple Syrup, Grade A", price: "21.00", qty: 3 });
 });
 
+// A cart line whose title, as Amazon actually emits it, carries every piece of cruft
+// a consumer should never have to scrub: a numeric HTML entity (&#039; → '), a named
+// entity (&amp; → &), the trailing "Opens in a new tab" screen-reader text from the
+// product link's aria-label, and the collapsed newline/tab whitespace around it.
+// Proven live 2026-07-10: "Young&#039;s Double-Slit Experiment... \n\n Opens in a new tab".
+const CRUFT_HTML = `
+<div class="sc-list-item sc-list-item-border-less" data-asin="B08DOUBLE01" data-quantity="1">
+  <a class="sc-product-link" href="/dp/B08DOUBLE01">
+    <span class="sc-product-title">Young&#039;s Double-Slit Experiment &amp; Interference Kit
+      <span class="aok-offscreen">Opens in a new tab</span></span>
+  </a>
+  <span class="a-offscreen">$42.00</span>
+</div>`;
+
+Deno.test("amazon cart: parseCart cleans cart-item titles at the source (entities, trailing 'Opens in a new tab', whitespace)", () => {
+  const lines = parseCart(CRUFT_HTML);
+  assertEquals(lines.length, 1);
+  assertEquals(lines[0].asin, "B08DOUBLE01");
+  // numeric &#039; → ', named &amp; → &, trailing "Opens in a new tab" stripped, the
+  // newline/tab run around it collapsed to a single space, trimmed — clean name.
+  assertEquals(lines[0].title, "Young's Double-Slit Experiment & Interference Kit");
+  assertEquals(lines[0].price, "$42.00");
+  assertEquals(lines[0].qty, 1);
+});
+
 Deno.test("amazon cart: parseCart skips sc-list-item rows without data-asin", () => {
   // A divider/header row carrying the standalone sc-list-item class but no data-asin
   // is not a product line.
