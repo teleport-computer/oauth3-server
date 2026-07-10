@@ -35,6 +35,15 @@ export const SCOPE_INGREDIENTS: Record<string, { plugin: string; reads: string[]
       label:
         "read-only · your upcoming events (the free/busy surface) · not event bodies or attendees, and no writes",
     },
+    // #92: the first cart/commerce scope. A cart-share friend holds this cap to read the
+    // owner's real Amazon cart line items (name, price, qty, ASIN) — confined to the /items
+    // read chokepoint, so it can't reach /screenshot, /jar, or any write surface.
+    "amazon:cart-read": {
+      plugin: "amazon",
+      reads: ["items"],
+      label:
+        "read-only · your Amazon cart line items (name, price, qty, ASIN) · not your address, payment, order history, or checkout",
+    },
   };
 
 // Per-plugin capability statements (RFC 0009 step 1) — the operator-authored sentence shown
@@ -72,6 +81,11 @@ export const PLUGIN_CAPABILITIES: Record<string, { plugin: string; statement: st
     plugin: "google-calendar",
     statement:
       "CAN read your upcoming events and a logged-in screenshot of calendar.google.com; a token MAY also carry a write:event:<id> cap to edit ONE named event. CANNOT create or delete events, or edit any event not named in its caps.",
+  },
+  amazon: {
+    plugin: "amazon",
+    statement:
+      "CAN read your Amazon cart line items and a logged-in screenshot of your cart. CANNOT check out, change address/payment, add items, or read order history.",
   },
 };
 
