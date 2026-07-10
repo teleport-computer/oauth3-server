@@ -10,6 +10,7 @@
 // Field paths shift between YouTube builds, so each extractor tries a couple of fallbacks.
 
 import { cookieHeader, Jar, Plugin, PluginItem, PluginListOptions } from "./types.ts";
+import { egressFetch } from "../egress.ts";
 
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
@@ -63,14 +64,19 @@ function parseHistory(data: any): PluginItem[] {
 export const youtubePlugin: Plugin = {
   id: "youtube",
   label: "YouTube history",
-  cookieDomains: [".youtube.com", ".google.com"],
+  // ONLY .youtube.com — a browser fetch to youtube.com sends only youtube.com cookies and
+  // authenticates fine. Including .google.com made the extension's flat name->value jar
+  // (grabJar: last-write-wins across cookieDomains) overwrite youtube.com's session cookies
+  // (__Secure-1PSID/3PSID, SAPISID, …) with .google.com's DIFFERENT values, so the server
+  // sent wrong values to youtube.com → logged_in=0 regardless of egress IP or cookie freshness.
+  cookieDomains: [".youtube.com"],
 
   loggedIn(jar: Jar): boolean {
     return !!(jar["SAPISID"] || jar["__Secure-3PAPISID"]);
   },
 
   async listItems(jar: Jar, _opts?: PluginListOptions): Promise<PluginItem[]> {
-    const r = await fetch("https://www.youtube.com/feed/history", {
+    const r = await egressFetch("https://www.youtube.com/feed/history", {
       headers: {
         "Cookie": cookieHeader(jar),
         "User-Agent": UA,

@@ -6,30 +6,56 @@
 //   GET    /api/tokens                        owner — list tokens
 //   DELETE /api/tokens/:token                 owner — revoke a token
 //   GET    /api/audit                         owner — audit log
+//   GET    /api/promote                       owner — proposed scope ingredients from observed reads
+//   GET    /api/scopes                        public — enforced scope-ingredient ledger + app consumes/offers (#88)
+//   GET    /api/scopes/:id                    public — one enforced ingredient (404 if unknown)
+//   GET    /scopes                            public — the composable-utilities panel (rendered view of /api/scopes, #88)
 //   POST   /api/connect   {plugin,subject?,app?}   app — start the grant handshake
 //   GET    /api/connect/:requestId            app — poll status (token once approved)
 //   POST   /api/connect/:requestId/approve|deny  owner_secret — the user's decision
 //   GET    /approve/:requestId                HTML approval screen
+//   GET    /api/:plugin/account              scoped token OR owner — account-level data (identity + karma)
 //   GET    /api/:plugin/items[/:id]           scoped token OR owner — read
+//   GET    /api/:plugin/live[?after=N]        scoped token OR owner — live item segments + frame urls
+//   GET    /api/:plugin/frame?u=<b64url>      scoped token OR owner — proxy one shared-screen image (binary)
 //   GET    /api/:plugin/screenshot            scoped token OR owner — logged-in render via Browser SPI
 
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
+import { configureEgress, egressFetch, egressProxy } from "./egress.ts";
 import { deleteJar, getJar, initVault, jarStatus, setJar } from "./vault.ts";
-import { initTokens, listTokens, mint, revoke, verify } from "./tokens.ts";
+import { initTokens, listTokens, mint, revoke, type Token, verify, verifyCap } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit } from "./audit.ts";
+import { formatAuditDecision, gate, Scope, STATIC_LISTING } from "./listing.ts";
+import { getListings, initListings } from "./listings.ts";
+import { initEval, logEval, updateEvalOutcome } from "./eval.ts";
 import { startScheduler } from "./scheduler.ts";
 import { approvePage } from "./approve-page.ts";
 import { appPage } from "./app-page.ts";
 import { loginPage } from "./login-page.ts";
+import { dashboardPage } from "./dashboard-page.ts";
+import { scopesPage } from "./scopes-page.ts";
+import { evidencePage, homePage, privacyPage, termsPage } from "./home-page.ts";
 import { createSession, destroySession, initSessions, verifySession } from "./sessions.ts";
 import { newChallenge, verifyDidSignIn } from "./identity.ts";
-import { browserScreenshot } from "./browser.ts";
+import { allCredentialIds, credentialsFor, initPasskeys, passkeyChallenge, verifyAuthentication, verifyRegistration } from "./passkey.ts";
+import { consumeState, enabledProviders, githubAuthUrl, githubEnv, githubExchange, googleAuthUrl, googleEnv, googleExchange, newState } from "./oidc.ts";
+import { configureOtter } from "./plugins/otter.ts";
+import { configureReddit } from "./plugins/reddit.ts";
+import { configureAmazon } from "./plugins/amazon.ts";
+import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.ts";
+import { verifySiwe } from "./siwe.ts";
+import { browserScreenshot, browserFeed } from "./browser.ts";
+import { apiLike, apiMe, apiTimeline, apiTweet, apiUnlike, browserTrace } from "./twitter-actions.ts";
+import { appDeclarations, pluginCapabilities, scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
+import { proposeIngredients } from "./promoter.ts";
+import { approveChallenge, createChallenge, denyChallenge, getChallenge, recordTokenUse, score, wasFirstUse } from "./stepup.ts";
 
 let ready = false;
 let ownerSecret = "";
 let publicUrl = "";
 let browserSpiUrl = "";
+let browserSpiSecret = "";
 
 export interface HandlerCtx { env: Record<string, string>; dataDir?: string; }
 
@@ -40,9 +66,18 @@ async function init(env: Record<string, string>, dataDir: string) {
   await initConnect(dataDir);
   await initAudit(dataDir);
   await initSessions(dataDir);
+  await initPasskeys(dataDir);
+  await initLinks(dataDir);
+  configureOtter(env);
+  configureReddit(env);
+  configureAmazon(env);
+  await initListings(dataDir);
+  await initEval(dataDir);
   ownerSecret = env.OWNER_SECRET || env.OAUTH3_OWNER_SECRET || env.EXT_SHARED_SECRET || "";
   publicUrl = (env.PUBLIC_URL || "").replace(/\/$/, "");
   browserSpiUrl = (env.BROWSER_SPI_URL || "").replace(/\/$/, "");
+  browserSpiSecret = env.BROWSER_SPI_SECRET || "";
+  configureEgress(env.EGRESS_PROXY_URL || "");
   if (!ownerSecret) console.warn("[init] OWNER_SECRET missing — cookie sync and minting will reject");
   startScheduler(env, dataDir);
   ready = true;
@@ -57,6 +92,12 @@ function json(obj: unknown, status = 200): Response {
 }
 function html(body: string): Response {
   return new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+}
+// After an OAuth redirect callback, hand the SPA its session via localStorage (the app
+// uses localStorage, not cookies) and bounce to the return url. `note` is a static string.
+function landingHtml(session: string | null, returnUrl: string, note: string): string {
+  const set = session ? `localStorage.setItem('oauth3_session', ${JSON.stringify(session)});` : "";
+  return `<!doctype html><meta charset=utf-8><body style="font:15px system-ui;max-width:30rem;margin:3rem auto;color:#111"><p>${note} Redirecting…</p><script>${set}location.href=${JSON.stringify(returnUrl)};</script>`;
 }
 const isOwner = (req: Request) => !!ownerSecret && req.headers.get("Authorization") === `Bearer ${ownerSecret}`;
 
@@ -90,9 +131,51 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   // presented directly (CLI/extension). null = unauthenticated. Jars + tokens scope to it.
   const subjectOf = (): string | null => session?.subject ?? (isOwner(req) ? "owner" : null);
 
+  // Public face: index + privacy + terms (needed to be a real public service; federated
+  // login providers require a reachable home page + privacy policy + ToS). See issue #32.
+  if (req.method === "GET" && (path === "/" || path === "")) return html(homePage(ctx.env));
+  if (req.method === "GET" && path === "/privacy") return html(privacyPage(ctx.env));
+  if (req.method === "GET" && path === "/terms") return html(termsPage(ctx.env));
+  if (req.method === "GET" && path === "/evidence") return html(evidencePage(ctx.env));
+
+  // User journeys test report — static HTML from disk if available.
+  if (req.method === "GET" && (path === "/journeys" || path === "/journeys/")) {
+    const journeysPath = (ctx.dataDir || ".") + "/journeys/index.html";
+    try {
+      const journeysHtml = await Deno.readTextFile(journeysPath);
+      return html(journeysHtml);
+    } catch {
+      return html("<html><body><h1>User Journeys Report</h1><p>Report not found at " + journeysPath + "</p></body></html>");
+    }
+  }
+  // Admin endpoint to update the journeys report (owner secret required).
+  if (req.method === "POST" && path === "/api/journeys") {
+    if (!isOwner(req)) return json({ error: "unauthorized" }, 401);
+    const html = await req.text();
+    const journeysDir = (ctx.dataDir || ".") + "/journeys";
+    const journeysPath = journeysDir + "/index.html";
+    await Deno.mkdir(journeysDir, { recursive: true });
+    await Deno.writeTextFile(journeysPath, html);
+    await audit("journeys.update", {});
+    return json({ ok: true, path: journeysPath });
+  }
+
   // The instance's own demo app — open it with the extension, no sign-in.
+  // ?plugin=<id> picks which adapter to demo (default otter).
   if (req.method === "GET" && (path === "/app" || path === "/app/")) {
-    return html(appPage());
+    return html(appPage(url.searchParams.get("plugin") || "otter"));
+  }
+
+  // Your account dashboard — visit plugin-free; signs in via /login, then shows
+  // connected apps, synced sites, and activity scoped to your subject.
+  if (req.method === "GET" && (path === "/dashboard" || path === "/dashboard/")) {
+    return html(dashboardPage());
+  }
+  // #88: the composition panel — renders the pod as composable capability-utilities from the
+  // SAME ledger functions GET /api/scopes serves (single source, can't drift). Public: the
+  // consumed labels are the enforced gate sentences and the ingredient list is already public.
+  if (req.method === "GET" && (path === "/scopes" || path === "/scopes/")) {
+    return html(scopesPage());
   }
 
   // --- web sign-in (so you approve apps without re-pasting the owner secret) ---
@@ -127,8 +210,173 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     await destroySession(authBearer);
     return json({ ok: true });
   }
+
+  // --- passkey (WebAuthn): enroll a passkey while signed in, then sign in with it on
+  // any device. rpId/origin are derived from PUBLIC_URL so it works behind the proxy. ---
+  if (path.startsWith("/api/passkey")) {
+    const pubOrigin = publicUrl ? new URL(publicUrl).origin : url.origin;
+    const origins = [pubOrigin], rpId = new URL(pubOrigin).hostname;
+    if (req.method === "POST" && path === "/api/passkey/register/options") {
+      const subj = subjectOf();
+      if (!subj) return json({ error: "sign in first to add a passkey" }, 401);
+      return json({ challenge: passkeyChallenge(), rpId, userId: subj });
+    }
+    if (req.method === "POST" && path === "/api/passkey/register") {
+      const subj = subjectOf();
+      if (!subj) return json({ error: "sign in first" }, 401);
+      const body = await req.json().catch(() => null) as any;
+      try { await audit("passkey.register", { subject: subj }); return json(await verifyRegistration(body, origins, subj)); }
+      catch (e) { return json({ error: (e as Error).message }, 400); }
+    }
+    if (req.method === "POST" && path === "/api/passkey/login/options") {
+      return json({ challenge: passkeyChallenge(), rpId, allowCredentials: allCredentialIds() });
+    }
+    if (req.method === "POST" && path === "/api/passkey/login") {
+      const body = await req.json().catch(() => null) as any;
+      try {
+        const { subject } = await verifyAuthentication(body, origins);
+        const token = await createSession(subject);
+        await audit("passkey.login", { subject });
+        return json({ ok: true, subject, session: token });
+      } catch (e) { return json({ error: (e as Error).message }, 401); }
+    }
+    if (req.method === "GET" && path === "/api/passkeys") {
+      const subj = subjectOf();
+      if (!subj) return json({ error: "unauthorized" }, 401);
+      return json({ passkeys: credentialsFor(subj) });
+    }
+  }
   if (req.method === "GET" && path === "/api/me") {
-    return json({ signedIn: !!session, subject: session?.subject });
+    return json({ signedIn: !!session, subject: session?.subject, providers: enabledProviders(ctx.env), links: session ? linksFor(session.subject) : [] });
+  }
+  // Unlink a linked sign-in. Lockout-safe: root subjects (userKey/did:key/owner) keep their
+  // localStorage/secret door so unlinking an alias is fine; a federated-rooted subject must
+  // keep at least one factor (links + passkeys).
+  if (req.method === "POST" && path === "/api/links/unlink") {
+    const subj = subjectOf();
+    if (!subj) return json({ error: "unauthorized" }, 401);
+    const body = await req.json().catch(() => null) as { providerId?: string } | null;
+    const pid = body?.providerId || "";
+    if (linkResolve(pid) !== subj) return json({ error: "not your link" }, 404);
+    const hasRoot = subj.startsWith("u-") || subj.startsWith("did:key:") || subj === "owner";
+    const remaining = linksFor(subj).filter((p) => p !== pid).length + credentialsFor(subj).length;
+    if (!hasRoot && remaining === 0) return json({ error: "can't unlink your only sign-in method" }, 409);
+    await linkUnbind(pid);
+    await audit("links.unlink", { subject: subj, providerId: pid });
+    return json({ ok: true });
+  }
+
+  // --- federated login: GitHub OAuth (RFC 0002) + account linking. A provider's routes
+  // exist iff its creds are present (else 404 + the login page omits the button). ---
+  if (path === "/api/login/providers" && req.method === "GET") {
+    return json(enabledProviders(ctx.env));
+  }
+  if (path.startsWith("/api/login/github")) {
+    const gh = githubEnv(ctx.env);
+    if (!gh) return json({ error: "github login not configured" }, 404);
+    const base = publicUrl || origin;
+    const redirectUri = `${base}/api/login/github/callback`;
+    const dash = `${base}/dashboard`;
+    if (req.method === "GET" && path === "/api/login/github") {
+      const rp = url.searchParams.get("return");
+      const ret = rp && rp.startsWith(base) ? rp : dash;               // open-redirect guard
+      // Return the URL for the client to navigate — the daemon ingress FOLLOWS server-side
+      // 3xx (would proxy GitHub's page back as 200) instead of handing it to the browser.
+      return json({ url: githubAuthUrl(gh, newState(ret), redirectUri) });
+    }
+    if (req.method === "POST" && path === "/api/login/github/link") {
+      const subj = subjectOf();
+      if (!subj) return json({ error: "sign in first to link" }, 401);
+      return json({ url: githubAuthUrl(gh, newState(dash, subj), redirectUri) });
+    }
+    if (req.method === "GET" && path === "/api/login/github/callback") {
+      const st = consumeState(url.searchParams.get("state") || "");
+      const code = url.searchParams.get("code") || "";
+      if (!st || !code) return html(landingHtml(null, dash, "GitHub sign-in failed (bad state or code)."));
+      try {
+        const { id } = await githubExchange(gh, code, redirectUri);
+        const providerId = `gh:${id}`;
+        if (st.linkSubject) {                                          // linking, not login
+          await linkBind(providerId, st.linkSubject);
+          await audit("login.github.link", { subject: st.linkSubject, providerId });
+          return html(landingHtml(null, st.ret, "Linked GitHub to your account."));
+        }
+        const subject = linkResolve(providerId) || providerId;        // take-over if linked
+        const session = await createSession(subject);
+        await audit("login.github", { subject });
+        return html(landingHtml(session, st.ret, "Signed in with GitHub."));
+      } catch (e) {
+        return html(landingHtml(null, dash, `GitHub sign-in error: ${(e as Error).message}.`));
+      }
+    }
+  }
+
+  // --- Google login (OIDC). Same shape as GitHub; subject = google:<sub>. Client-driven. ---
+  if (path.startsWith("/api/login/google")) {
+    const g = googleEnv(ctx.env);
+    if (!g) return json({ error: "google login not configured" }, 404);
+    const base = publicUrl || origin;
+    const redirectUri = `${base}/api/login/google/callback`;
+    const dash = `${base}/dashboard`;
+    if (req.method === "GET" && path === "/api/login/google") {
+      const rp = url.searchParams.get("return");
+      const ret = rp && rp.startsWith(base) ? rp : dash;
+      return json({ url: googleAuthUrl(g, newState(ret), redirectUri) });
+    }
+    if (req.method === "POST" && path === "/api/login/google/link") {
+      const subj = subjectOf();
+      if (!subj) return json({ error: "sign in first to link" }, 401);
+      return json({ url: googleAuthUrl(g, newState(dash, subj), redirectUri) });
+    }
+    if (req.method === "GET" && path === "/api/login/google/callback") {
+      const st = consumeState(url.searchParams.get("state") || "");
+      const code = url.searchParams.get("code") || "";
+      if (!st || !code) return html(landingHtml(null, dash, "Google sign-in failed (bad state or code)."));
+      try {
+        const { sub } = await googleExchange(g, code, redirectUri);
+        const providerId = `google:${sub}`;
+        if (st.linkSubject) {
+          await linkBind(providerId, st.linkSubject);
+          await audit("login.google.link", { subject: st.linkSubject, providerId });
+          return html(landingHtml(null, st.ret, "Linked Google to your account."));
+        }
+        const subject = linkResolve(providerId) || providerId;
+        const session = await createSession(subject);
+        await audit("login.google", { subject });
+        return html(landingHtml(session, st.ret, "Signed in with Google."));
+      } catch (e) {
+        return html(landingHtml(null, dash, `Google sign-in error: ${(e as Error).message}.`));
+      }
+    }
+  }
+
+  // --- OpenKey login: SIWE -> did:pkh. Client-driven (the OpenKey wallet signs a SIWE
+  // message), so it POSTs {message, signature} here — no server redirect. ---
+  if (path.startsWith("/api/login/openkey")) {
+    const host = new URL(publicUrl || origin).host;
+    if (req.method === "GET" && path === "/api/login/openkey/nonce") {
+      return json({ nonce: newState(""), domain: host, uri: publicUrl || origin });
+    }
+    if (req.method === "POST" && (path === "/api/login/openkey" || path === "/api/login/openkey/link")) {
+      const body = await req.json().catch(() => null) as { message?: string; signature?: string } | null;
+      if (!body?.message || !body?.signature) return json({ error: "message + signature required" }, 400);
+      let v: { address: string; nonce: string; domain: string };
+      try { v = verifySiwe(body.message, body.signature); } catch (e) { return json({ error: (e as Error).message }, 401); }
+      if (!consumeState(v.nonce)) return json({ error: "unknown or expired nonce" }, 401);
+      if (v.domain && v.domain !== host) return json({ error: `domain mismatch: ${v.domain}` }, 401);
+      const providerId = `did:pkh:eip155:1:${v.address}`;
+      if (path.endsWith("/link")) {
+        const subj = subjectOf();
+        if (!subj) return json({ error: "sign in first to link" }, 401);
+        await linkBind(providerId, subj);
+        await audit("login.openkey.link", { subject: subj, providerId });
+        return json({ ok: true, linked: providerId });
+      }
+      const subject = linkResolve(providerId) || providerId;
+      const session = await createSession(subject);
+      await audit("login.openkey", { subject });
+      return json({ ok: true, subject, session });
+    }
   }
 
   if (req.method === "GET" && path === "/api/health") {
@@ -139,10 +387,15 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const subj = subjectOf(); // jar status is per-identity; anonymous sees none present
     return json({
       plugins: allPlugins().map((p) => ({
-        id: p.id, label: p.label, cookieDomains: p.cookieDomains,
+        id: p.id, label: p.label, cookieDomains: p.cookieDomains, account: !!p.account,
         jar: subj ? jarStatus(subj, p.id) : { present: false, updatedAt: 0, count: 0 },
       })),
     });
+  }
+
+  // RFC 0007 §5.2: listing store
+  if (req.method === "GET" && path === "/api/listings") {
+    return json({ listings: getListings() });
   }
 
   if (req.method === "POST" && path === "/api/cookies") {
@@ -179,28 +432,102 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return json({ token: t.token, plugin: t.plugin, subject: t.subject });
   }
   if (req.method === "GET" && path === "/api/tokens") {
-    if (!isOwner(req) && !session) return json({ error: "unauthorized" }, 401);
-    return json({ tokens: listTokens() });
+    const subj = subjectOf();
+    if (!subj) return json({ error: "unauthorized" }, 401);
+    const all = listTokens();
+    return json({ tokens: subj === "owner" ? all : all.filter((t) => t.subject === subj) });
   }
   const tok = path.match(/^\/api\/tokens\/(.+)$/);
   if (req.method === "DELETE" && tok) {
     if (!isOwner(req) && !session) return json({ error: "unauthorized" }, 401);
     const ok = await revoke(decodeURIComponent(tok[1]));
     await audit("token.revoke", { token: tok[1].slice(0, 16), found: ok });
+    // RFC 0007 §4.1: log revocation outcome (we don't have app/plugin here, so skip)
     return json({ ok, revoked: ok });
   }
 
   if (req.method === "GET" && path === "/api/audit") {
-    if (!isOwner(req) && !session) return json({ error: "unauthorized" }, 401);
-    return json({ audit: auditLog() });
+    const subj = subjectOf();
+    if (!subj) return json({ error: "unauthorized" }, 401);
+    const all = auditLog();
+    return json({ audit: subj === "owner" ? all : all.filter((e) => (e.detail as { subject?: string } | undefined)?.subject === subj) });
+  }
+
+  // The enforced scope-ingredient ledger, public + read-only (RFC 0004 — closure-can't-drift):
+  // the scope sentence shown to a user MUST come from here, not an app-authored string, so
+  // the displayed claim is provably what's enforced at the gate (#73). An app fetching this
+  // pre-approval has no token yet; the labels are not secret (they appear in gate 403s).
+  // #88: the ledger now also carries the app → {consumes, offers} composition graph. Each
+  // consumed id is resolved to its enforced ingredient record (no drift), so the UX layer can
+  // render the pod as composable capability-utilities straight from this one public source.
+  if (req.method === "GET" && path === "/api/scopes") {
+    return json({ scopes: scopeIngredients(), plugins: pluginCapabilities(), apps: appDeclarations() });
+  }
+  const scopeMatch = path.match(/^\/api\/scopes\/(.+)$/);
+  if (req.method === "GET" && scopeMatch) {
+    const id = decodeURIComponent(scopeMatch[1]);
+    const ing = scopeIngredient(id);
+    return ing ? json(ing) : json({ error: `unknown scope ingredient: ${id}` }, 404);
+  }
+
+  // The 4th self-improvement loop (#72): cluster the gate-allow audit events per app/plugin
+  // and PROPOSE named scope ingredients (entries for scopes.ts) capturing exactly what each
+  // app was observed reading. Owner-only: it reads everyone's audit trail. Output is the
+  // decision doc for curating a new ingredient (name/label are drafts; a human finalizes).
+  if (req.method === "GET" && path === "/api/promote") {
+    if (!isOwner(req)) return json({ error: "unauthorized" }, 401);
+    return json({ proposals: proposeIngredients(auditLog()) });
+  }
+
+  // Layer-1 listing catalog (read-only; no auth needed for discoverability).
+  if (req.method === "GET" && path === "/api/listing") {
+    return json({ listing: STATIC_LISTING });
   }
 
   // --- connect / approval ---
   if (req.method === "POST" && path === "/api/connect") {
     const body = await req.json().catch(() => null) as any;
     if (!getPlugin(body?.plugin)) return json({ error: "unknown plugin" }, 404);
-    const r = await createConnect(body.plugin, body.subject, body.app);
-    await audit("connect.request", { plugin: r.plugin, app: r.app, requestId: r.requestId });
+
+    // Layer-1 listing gate (AC1, AC3, AC4): refuse unlisted, dev-mode for scope overflow.
+    const appId = body?.app || "unknown";
+    const requestedScope: Scope = body?.scope === "raw" ? "raw" : "read";
+    const gateDecision = gate(appId, body.plugin, requestedScope);
+
+    if (gateDecision.decision === "refuse") {
+      await audit("connect.refuse", formatAuditDecision(appId, body.plugin, requestedScope, gateDecision));
+      return json({ error: gateDecision.reason, mode: "refuse" }, 403);
+    }
+
+    if (gateDecision.decision === "devmode") {
+      await audit("connect.devmode", formatAuditDecision(appId, body.plugin, requestedScope, gateDecision));
+      // Dev-mode: explicit affordance, not silent (AC3, AC4). The response carries the reason
+      // and a mode marker; the client must present an explicit dev-mode affordance to proceed.
+      return json({
+        error: gateDecision.reason,
+        mode: "dev",
+        note: "This request exceeds the app's listed scope. Use dev-mode to proceed (requires explicit owner approval).",
+      }, 403);
+    }
+
+    // Allowed by the listing gate: proceed to layer-2 grant. caps (e.g. "jar",
+    // "write:event:<id>") are surfaced on the approve page for informed consent; the minted
+    // token only carries them after the owner approves. scope/attestation feed the RFC 0007
+    // routing decision (friction) cached on the request for the approve page to render.
+    const caps = Array.isArray(body?.caps) ? body.caps.filter((c: unknown) => typeof c === "string") : undefined;
+    const r = await createConnect(body.plugin, body.subject, body.app, caps, body.scope, body.attestation);
+    await audit("connect.request", { plugin: r.plugin, app: r.app, caps: r.caps, requestId: r.requestId, scope: r.scope, friction: r.routeResult?.friction });
+    // RFC 0007 §4.1: log eval entry at request time
+    await logEval({
+      ts: Date.now(),
+      app: r.app || r.requestId,
+      plugin: r.plugin,
+      scope: r.scope,
+      statement: "(pending)", // filled when listing is resolved
+      workflow: "llm-judge", // phase 1 default
+      decision: "discharged", // the layer-1 gate only lets listed requests through
+      friction: (r.routeResult?.friction || "informed-tap") as any,
+    });
     return json({ requestId: r.requestId, approveUrl: `${origin}/approve/${r.requestId}` });
   }
   const conn = path.match(/^\/api\/connect\/([^/]+)(?:\/(approve|deny))?$/);
@@ -217,12 +544,122 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       const r = action === "approve" ? await approveConnect(id, approver) : await denyConnect(id);
       if (!r) return json({ error: "unknown or already-decided request" }, 404);
       await audit(`connect.${action}`, { subject: approver, plugin: r.plugin, app: r.app, requestId: id });
+      // RFC 0007 §4.1: fill outcome when user decides
+      await updateEvalOutcome(r.app || id, r.plugin, action === "approve" ? "approved" : "denied");
       return json({ ok: true, status: r.status });
     }
   }
   const ap = path.match(/^\/approve\/([^/]+)$/);
   if (req.method === "GET" && ap) {
     return html(approvePage(getConnect(ap[1]), ap[1]));
+  }
+
+  // --- step-up challenges (RFC 0005) — out-of-band confirmation channel for the gate
+  // below. The app polls GET, the user (session or owner_secret) answers POST. ---
+  const ch = path.match(/^\/api\/challenge\/([^/]+)(?:\/(approve|deny))?$/);
+  if (ch) {
+    const id = ch[1], action = ch[2];
+    if (req.method === "GET" && !action) {
+      const c = getChallenge(id);
+      if (!c) return json({ error: "unknown challenge" }, 404);
+      // Three outcomes for the polling app:
+      // - approved: retry will succeed
+      // - denied/expired: terminal fail
+      // - pending: keep polling
+      if (c.status === "approved") {
+        return json({ status: "approved", challengeId: c.challengeId });
+      } else if (c.status === "denied" || c.status === "expired") {
+        return json({ status: c.status, challengeId: c.challengeId }, 403);
+      } else {
+        return json({ status: "pending", challengeId: c.challengeId, expiresAt: c.expiresAt });
+      }
+    }
+    if (req.method === "POST" && action) {
+      const body = await req.json().catch(() => null) as any;
+      const approver = subjectOf() ?? (!!ownerSecret && body?.owner_secret === ownerSecret ? "owner" : null);
+      if (!approver) return json({ error: "sign in to respond" }, 401);
+      const c = action === "approve" ? approveChallenge(id, approver, isOwner(req)) : denyChallenge(id, approver, isOwner(req));
+      if (!c) return json({ error: "unknown or already-decided challenge" }, 404);
+      return json({ ok: true, status: c.status, challengeId: c.challengeId });
+    }
+  }
+
+  // --- Twitter/X debug tool (owner-only). First WRITE surface. Two paths over the
+  // same vault jar: ?path=api (reverse-engineered client) or ?path=browser (real
+  // browser + /capture-trace, the reification instrument). See twitter-actions.ts. ---
+  if (path.startsWith("/api/twitter/debug/")) {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    const jar = getJar("owner", "twitter");
+    if (!jar) return json({ error: "no twitter jar synced" }, 409);
+    const op = path.slice("/api/twitter/debug/".length);
+    const body = req.method === "POST" ? (await req.json().catch(() => ({})) as any) : {};
+    const way = url.searchParams.get("path") || body.path || "api";
+    try {
+      // browser path = record the real request trajectory & reify it (RFC 0001).
+      if (way === "browser") {
+        if (op !== "timeline" && op !== "trace") {
+          return json({ error: `browser-path '${op}' needs the xdotool write-instrument (bridge /eval can't actuate)` }, 501);
+        }
+        const target = url.searchParams.get("url") || "https://x.com/home";
+        const out = await browserTrace(browserSpiUrl, jar, target, browserSpiSecret, op === "trace" ? undefined : op);
+        await audit("twitter.debug", { op, path: "browser", url: out.url });
+        return json({ op, path: "browser", ...out });
+      }
+      // api path
+      let data: unknown;
+      if (op === "me") data = await apiMe(jar);
+      else if (op === "timeline") data = await apiTimeline(jar, Number(url.searchParams.get("count")) || 20);
+      else if (op === "tweet") data = await apiTweet(jar, String(body.text ?? ""));
+      else if (op === "like") data = await apiLike(jar, String(body.tweetId ?? ""));
+      else if (op === "unlike") data = await apiUnlike(jar, String(body.tweetId ?? ""));
+      else return json({ error: `unknown op '${op}'` }, 404);
+      await audit("twitter.debug", { op, path: "api" });
+      return json({ op, path: "api", data });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  // The read chokepoint — every scoped read passes here after auth and before the jar is
+  // touched. Three seams at one point: (A) RFC 0003/0004 scope enforcement — a token
+  // carrying a scope-ingredient cap is confined to that ingredient's reads; owner + legacy
+  // tokens (no scope cap) are UNRESTRICTED (scopeReads → null). (B) RFC 0005 step-up gate —
+  // a scoped token's first read is held for out-of-band confirmation (challenge_pending,
+  // 409); a future reject signal would 403; the owner bypasses. (C) every passing read is
+  // audited so the chokepoint accrues a corpus. First-use is consumed only AFTER a
+  // successful read (recordTokenUse at each read call site), so a challenged read that never
+  // completes stays hot — the app must answer the challenge AND get a clean read to clear it.
+  async function gateRead(t: Token | null, pluginId: string, readKind: string, bearer: string): Promise<Response | null> {
+    const by = t ? (t.app || t.subject || "token") : "owner";
+    const allowed = scopeReads(t?.caps);
+    if (allowed && !allowed.has(readKind)) {
+      await audit("gate", { plugin: pluginId, readKind, decision: "deny", by });
+      return json({ error: `scope: this token may read ${[...allowed].join("+")} only, not ${readKind}`, scope: scopeLabel(t?.caps) }, 403);
+    }
+    if (t && !isOwner(req)) {
+      const scored = score(bearer, pluginId, readKind, t.app);
+      if (scored.decision === "challenge") {
+        const chal = createChallenge(pluginId, readKind, bearer, t.app, scored.signal || "unknown");
+        await audit("stepup.challenged", {
+          challengeId: chal.challengeId,
+          plugin: pluginId,
+          item: readKind,
+          app: t.app,
+          signal: scored.signal,
+        });
+        return json({
+          error: "challenge_pending",
+          challengeId: chal.challengeId,
+          message: "Read requires step-up approval. Poll /api/challenge/:id for status.",
+        }, 409);
+      }
+      if (scored.decision === "reject") {
+        await audit("stepup.rejected", { plugin: pluginId, item: readKind, app: t.app, signal: scored.signal });
+        return json({ error: "rejected", signal: scored.signal }, 403);
+      }
+    }
+    await audit("gate", { plugin: pluginId, readKind, decision: "allow", by });
+    return null;
   }
 
   // --- logged-in render via the Browser SPI (same vault jar as /items) ---
@@ -233,6 +670,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "screenshot", bearer); if (denied) return denied;
     const subj = t ? (t.subject ?? "owner") : "owner";
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
@@ -240,9 +678,140 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const target = url.searchParams.get("url") || plugin.renderUrl ||
       `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
     try {
-      const shot = await browserScreenshot(browserSpiUrl, plugin, jar, target);
+      const shot = await browserScreenshot(browserSpiUrl, plugin, jar, target, browserSpiSecret);
+      // Record token use after successful read (marks first-use as consumed)
+      if (t && !isOwner(req)) {
+        recordTokenUse(bearer, plugin.id);
+      }
       await audit("screenshot", { plugin: plugin.id, url: target, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, url: target, ...shot });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  // --- raw-jar release (delegated-jar consumer apps like twitter-debug). This crosses the
+  // "app never sees the raw jar" line, so it is gated by owner OR a token that carries the
+  // "jar" capability — which is only granted through an explicit consent screen at approve time. ---
+  const jarM = path.match(/^\/api\/([a-z0-9-]+)\/jar$/);
+  if (req.method === "GET" && jarM) {
+    const plugin = getPlugin(jarM[1]);
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verifyCap(bearer, plugin.id, "jar");
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const jar = getJar(subj, plugin.id);
+    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    await audit("jar.release", { plugin: plugin.id, subject: subj, count: Object.keys(jar).length, by: t ? (t.app || t.subject || "token") : "owner" });
+    return json({ plugin: plugin.id, subject: subj, jar });
+  }
+
+  // --- reconstructed feed as structured JSON (OAuth3's data API). The viewer is a
+  // SEPARATE relying-party app (e.g. /timeline-peek) that fetches this with a scoped
+  // token — not a page served here. Gated by owner or a scoped token.
+  const feedM = path.match(/^\/api\/([a-z0-9-]+)\/feed$/);
+  if (req.method === "GET" && feedM) {
+    const plugin = getPlugin(feedM[1]);
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verify(bearer, plugin.id);
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "feed", bearer); if (denied) return denied;
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const jar = getJar(subj, plugin.id);
+    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    const target = url.searchParams.get("url") || plugin.renderUrl ||
+      `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
+    try {
+      const { who, items } = await browserFeed(browserSpiUrl, plugin, jar, target, browserSpiSecret);
+      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      await audit("feed", { plugin: plugin.id, count: items.length, by: t ? (t.app || t.subject || "token") : "owner" });
+      return json({ plugin: plugin.id, who, items });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  // --- TEMP owner-only jar probe: names + critical-cookie lengths + pod-side fetch (IP-vs-jar). ---
+  if (req.method === "GET" && path === "/api/youtube/debug") {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    const subj = url.searchParams.get("subject") || "owner";
+    const jar = getJar(subj, "youtube");
+    if (!jar) return json({ error: `no jar for ${subj}` }, 409);
+    const crit = ["SID", "HSID", "SSID", "APISID", "SAPISID", "__Secure-1PSID", "__Secure-3PSID", "__Secure-1PAPISID", "__Secure-3PAPISID", "LOGIN_INFO"];
+    const critical = Object.fromEntries(crit.map((c) => [c, c in jar ? (jar[c]?.length ?? 0) : null]));
+    // ?egress=1 routes the probe fetch through the shared VPN (so we can A/B the SAME jar
+    // direct-vs-proxied and confirm the datacenter-IP de-auth theory).
+    const viaEgress = url.searchParams.get("egress") === "1";
+    const doFetch = viaEgress ? egressFetch : fetch;
+    let fetchInfo: Record<string, unknown>;
+    try {
+      const r = await doFetch("https://www.youtube.com/feed/history", {
+        headers: {
+          "Cookie": Object.entries(jar).map(([k, v]) => `${k}=${v}`).join("; "),
+          "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+        signal: AbortSignal.timeout(30_000),
+      });
+      const txt = await r.text();
+      const lg = txt.match(/"logged_in","value":"(\d)"/);
+      fetchInfo = { status: r.status, len: txt.length, logged_in: lg ? lg[1] : "?", consentWall: /consent\.(youtube|google)\.com|CONSENT\+PENDING/.test(txt) };
+    } catch (e) {
+      fetchInfo = { error: (e as Error).message };
+    }
+    return json({ subject: subj, count: Object.keys(jar).length, egress: { via: viaEgress, proxy: egressProxy() || null }, names: Object.keys(jar), critical, fetch: fetchInfo });
+  }
+
+  // --- live-follow (scoped token or owner): the currently-live item's recent segments
+  // + shared-screen frame urls. Same read scope as /items. ---
+  const liveM = path.match(/^\/api\/([a-z0-9-]+)\/live$/);
+  if (req.method === "GET" && liveM) {
+    const plugin = getPlugin(liveM[1]);
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    if (!plugin.live) return json({ error: `${plugin.id} has no live view` }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verify(bearer, plugin.id);
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "live", bearer); if (denied) return denied;
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const jar = getJar(subj, plugin.id);
+    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    try {
+      const data = await plugin.live(jar, Number(url.searchParams.get("after") || "0") || 0);
+      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      await audit("live", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
+      return json({ plugin: plugin.id, data });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  // --- frame proxy (scoped token or owner): stream one shared-screen image from the
+  // site CDN. ?u = base64url of the image url. Binary out, so not the json envelope. ---
+  const frameM = path.match(/^\/api\/([a-z0-9-]+)\/frame$/);
+  if (req.method === "GET" && frameM) {
+    const plugin = getPlugin(frameM[1]);
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    if (!plugin.fetchFrame) return json({ error: `${plugin.id} has no frames` }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verify(bearer, plugin.id);
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "frame", bearer); if (denied) return denied;
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const jar = getJar(subj, plugin.id);
+    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    let target: string;
+    try { target = atob((url.searchParams.get("u") || "").replace(/-/g, "+").replace(/_/g, "/")); }
+    catch { return json({ error: "bad frame url" }, 400); }
+    try {
+      const { bytes, contentType } = await plugin.fetchFrame(jar, target);
+      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      return new Response(bytes as unknown as BodyInit, { headers: { "Content-Type": contentType, "Access-Control-Allow-Origin": "*" } });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
     }
@@ -256,19 +825,90 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "items", bearer); if (denied) return denied;
     // A scoped token reads its own subject's jar; the owner secret reads owner's.
     const subj = t ? (t.subject ?? "owner") : "owner";
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+
+    // Step-up gate now lives in gateRead at the read chokepoint (RFC 0005); first-use is
+    // cleared by recordTokenUse below only after a successful read.
+
     try {
       const listOpts = {
         page: url.searchParams.get("page") ? Number(url.searchParams.get("page")) : undefined,
         pageSize: url.searchParams.get("page_size") ? Number(url.searchParams.get("page_size")) : undefined,
       };
       const data = m[2] ? await plugin.fetchItem(jar, decodeURIComponent(m[2])) : await plugin.listItems(jar, listOpts);
+      // Record token use after successful read (marks first-use as consumed)
+      if (t && !isOwner(req)) {
+        recordTokenUse(bearer, plugin.id);
+      }
       await audit("read", { plugin: plugin.id, item: m[2] || "list", by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, data });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  // --- account-level data (scoped token or owner): identity + stats for the logged-in
+  // account. For reddit this is the account's karma (comment + link + total) — the read
+  // behind the `reddit:karma` scope ingredient. Same chokepoint as /items (readKind
+  // "account"), so a karma-scoped token is confined to this and cannot read saved posts. ---
+  const acc = path.match(/^\/api\/([a-z0-9-]+)\/account$/);
+  if (req.method === "GET" && acc) {
+    const plugin = getPlugin(acc[1]);
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    if (!plugin.account) return json({ error: `${plugin.id} has no account view` }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verify(bearer, plugin.id);
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "account", bearer); if (denied) return denied;
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const jar = getJar(subj, plugin.id);
+    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    try {
+      const data = await plugin.account(jar);
+      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      await audit("account", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
+      return json({ plugin: plugin.id, account: data });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  // --- google-calendar event-scoped WRITE (RFC: edit-on-behalf, attenuated to one event).
+  // The owner may always edit; a delegated app may edit ONE event only if its token carries
+  // the structured cap "write:event:<eventId>". verifyCap rejects any other event id (exact
+  // string match — "write:event:A" does not satisfy "write:event:B") and rejects read-only
+  // tokens. Every write attempt is audited, authorized or not. The actual session write
+  // against calendar.google.com is captured from a live trajectory (operator-run, #69); until
+  // then plugin.editItem throws an honest error rather than assuming an endpoint. ---
+  const gcEvt = path.match(/^\/api\/google-calendar\/event\/([^/]+)$/);
+  if (req.method === "POST" && gcEvt) {
+    const eventId = decodeURIComponent(gcEvt[1]);
+    const plugin = getPlugin("google-calendar");
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const cap = `write:event:${eventId}`;
+    const t = verifyCap(bearer, "google-calendar", cap);
+    if (!isOwner(req) && !t) {
+      await audit("google-calendar.event.edit.denied", { eventId, reason: "unauthorized" });
+      return json({ error: `unauthorized — token must carry ${cap}` }, 401);
+    }
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const by = t ? (t.app || t.subject || "token") : "owner";
+    const body = await req.json().catch(() => null) as { changes?: unknown } | null;
+    const jar = getJar(subj, "google-calendar");
+    if (!jar) return json({ error: "no jar synced for google-calendar" }, 409);
+    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    await audit("google-calendar.event.edit", { eventId, subject: subj, by });
+    if (!plugin.editItem) return json({ error: "plugin does not expose writes" }, 501);
+    try {
+      const result = await plugin.editItem(jar, eventId, body?.changes);
+      return json({ ok: true, plugin: "google-calendar", eventId, result });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
     }

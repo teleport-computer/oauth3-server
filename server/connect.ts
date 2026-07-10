@@ -4,15 +4,24 @@
 // requestId. The app never holds the owner secret.
 
 import { mint } from "./tokens.ts";
+import { route } from "./routing.ts";
+import type { RouteResult } from "./types.ts";
 
 export interface ConnectReq {
   requestId: string;
   plugin: string;
   subject?: string;
   app?: string;
+  caps?: string[]; // requested capabilities (e.g. "jar", "write:event:<id>"); surfaced on the approve page for consent
+  // RFC 0007 §1.1: requested attenuation (breadth axis)
+  scope?: string;
+  // RFC 0007 §1.1: verifiability claim (URL of td-0020 evidence bundle)
+  attestation?: string;
   status: "pending" | "approved" | "denied";
   token?: string;
   createdAt: number;
+  // RFC 0007 §1.4: routing decision cached at request time
+  routeResult?: RouteResult;
 }
 
 let file = "";
@@ -29,9 +38,31 @@ export async function initConnect(dir: string): Promise<void> {
   catch (e) { if (!(e instanceof Deno.errors.NotFound)) throw e; }
 }
 
-export async function createConnect(plugin: string, subject?: string, app?: string): Promise<ConnectReq> {
+// createConnect records a pending grant. The layer-1 listing gate (listing.ts `gate()`)
+// is enforced upstream in the handler and stays the authoritative ledger; here we also
+// compute the RFC 0007 routing decision (friction) so the approve page can render it.
+export async function createConnect(
+  plugin: string,
+  subject?: string,
+  app?: string,
+  caps?: string[],
+  scope?: string,
+  attestation?: string,
+): Promise<ConnectReq> {
   const requestId = `req-${crypto.randomUUID().replace(/-/g, "")}`;
-  reqs[requestId] = { requestId, plugin, subject, app, status: "pending", createdAt: Date.now() };
+  const routeResult = route(plugin, scope, attestation);
+  reqs[requestId] = {
+    requestId,
+    plugin,
+    subject,
+    app,
+    ...(caps?.length ? { caps } : {}),
+    scope,
+    attestation,
+    status: "pending",
+    createdAt: Date.now(),
+    routeResult,
+  };
   await persist();
   return reqs[requestId];
 }
@@ -43,7 +74,9 @@ export function getConnect(id: string): ConnectReq | undefined { return reqs[id]
 export async function approveConnect(id: string, approver: string): Promise<ConnectReq | null> {
   const r = reqs[id];
   if (!r || r.status !== "pending") return null;
-  const t = await mint(r.plugin, approver, r.app);
+  // The minted token carries the requested caps (e.g. write:event:<id>) only after the
+  // approver sees them on the consent screen — informed consent for a write capability.
+  const t = await mint(r.plugin, approver, r.app, r.caps);
   r.status = "approved";
   r.token = t.token;
   await persist();

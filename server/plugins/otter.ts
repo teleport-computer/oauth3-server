@@ -9,8 +9,14 @@
 
 import { cookieHeader, Jar, Plugin, PluginItem, PluginListOptions } from "./types.ts";
 
-// Overridable so a demo/e2e can point at a fixture server; defaults to live Otter.
-const BASE = Deno.env.get("OTTER_BASE") || "https://otter.ai/forward/api/v1";
+// Live Otter API base. NOTE: must NOT read Deno.env at module top level — the daemon
+// runs the isolated container with --deny-env (env arrives via ctx.env/argv), so a
+// top-level Deno.env.get throws at import and crashes the container. The fixture override
+// (OTTER_BASE, for e2e/demo) comes through the handler's env via configureOtter().
+let BASE = "https://otter.ai/forward/api/v1";
+export function configureOtter(env: Record<string, string>): void {
+  if (env.OTTER_BASE) BASE = env.OTTER_BASE.replace(/\/$/, "");
+}
 const UA = "Mozilla/5.0";
 
 function headers(jar: Jar, extra: Record<string, string> = {}): Record<string, string> {
@@ -52,7 +58,7 @@ async function unzipFirst(buf: Uint8Array): Promise<Uint8Array> {
 
 export const otterPlugin: Plugin = {
   id: "otter",
-  label: "ShapeRotator (Otter.ai)",
+  label: "Otter",
   cookieDomains: [".otter.ai"],
 
   loggedIn(jar: Jar): boolean {
@@ -103,5 +109,44 @@ export const otterPlugin: Plugin = {
     if (!r.ok) throw new Error(`otter bulk_export ${r.status}: ${(await r.text()).slice(0, 200)}`);
     const text = new TextDecoder().decode(await unzipFirst(new Uint8Array(await r.arrayBuffer())));
     return { otid: id, transcript: text };
+  },
+
+  // Follow the meeting that's live right now: recent transcript segments (keyed by
+  // `order` so the consumer polls with ?after=), plus the last few shared-screen
+  // frames as raw CDN urls (the consumer fetches each back through /otter/frame).
+  async live(jar: Jar, after: number): Promise<unknown> {
+    const uid = await userId(jar);
+    const res = await getJSON("/speeches", jar, { userid: uid, page_size: "20", source: "owned" });
+    const sp = (res?.speeches ?? []).find((x: any) => x.live_status === "live");
+    if (!sp) return { live: false };
+    const d = (await getJSON("/speech", jar, { userid: uid, otid: sp.otid }))?.speech ?? {};
+    const segs = [...(d.transcripts ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    let rows = segs
+      .map((t: any) => ({ order: Number(t.order ?? 0), text: String(t.transcript ?? "").trim() }))
+      .filter((r) => r.text);
+    rows = after <= 0 ? rows.slice(-40) : rows.filter((r) => r.order > after);
+    const max_order = rows.reduce((m, r) => Math.max(m, r.order), after);
+    const images = [...(d.images ?? [])]
+      .sort((a, b) => (a.offset ?? 0) - (b.offset ?? 0))
+      .slice(-8)
+      .map((im: any) => ({ offset: im.offset, url: im.image_url }));
+    return { live: true, title: sp.title, segments: rows, max_order, images };
+  },
+
+  // Proxy one shared-screen frame. Only the site's own CDN is reachable, so a stray
+  // url in the jar can't turn this into an SSRF.
+  async fetchFrame(jar: Jar, imageUrl: string): Promise<{ bytes: Uint8Array; contentType: string }> {
+    if (!(new URL(imageUrl).hostname || "").endsWith("aisense.com")) {
+      throw new Error("only api.aisense.com frames are proxied");
+    }
+    const media = Object.fromEntries(
+      ["sessionid", "csrftoken"].filter((k) => jar[k]).map((k) => [k, jar[k]]),
+    );
+    const r = await fetch(imageUrl, {
+      headers: { Cookie: cookieHeader(media), "User-Agent": UA, Referer: "https://otter.ai/" },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!r.ok) throw new Error(`otter frame ${r.status}`);
+    return { bytes: new Uint8Array(await r.arrayBuffer()), contentType: r.headers.get("content-type") || "image/png" };
   },
 };

@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>oauth3 — read your accounts without surrendering your cookies</title>
-<link rel="icon" type="image/svg+xml" href="icon.svg">
-<link rel="apple-touch-icon" href="icon.svg">
-<meta name="description" content="OAuth3 lets apps read your accounts with a scoped, revocable token — never your raw cookies. Your cookies live in a TEE you control; apps read through it. Live demo: Otter Copilot." />
+<title>oauth3 — deploy apps your users can verify</title>
+<link rel="icon" type="image/png" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<meta name="description" content="Deploy an app to a TEE pod that proves to everyone who opens it that it does exactly what you say. People delegate any account to the apps they choose, scoped and revocable. Live demo: Otter Copilot." />
 <meta property="og:title" content="oauth3" />
-<meta property="og:description" content="Apps read your accounts with a scoped, revocable token — never your cookies. Live demo: Otter Copilot, running in a TEE." />
+<meta property="og:description" content="Deploy an app to a TEE pod that proves to everyone who opens it that it does what you say. People delegate any account, scoped and revocable. Live demo: Otter Copilot." />
 <meta property="og:type" content="website" />
 <style>
   :root {
@@ -36,6 +36,8 @@
     letter-spacing: -.02em; margin: 0; text-transform: lowercase; }
   .tagline { font-size: clamp(20px, 3vw, 27px); line-height: 1.25; margin: 22px 0 0; max-width: 18em; }
   .tagline b { font-weight: 600; }
+  .tagline.sub { font-size: clamp(17px, 2.4vw, 21px); color: var(--faint); margin-top: 14px; max-width: 22em; }
+  .tagline.sub b { color: var(--ink); }
 
   section.block { padding: 52px 0 0; }
   h2 { font-family: var(--mono); font-weight: 500; font-size: 12px; letter-spacing: .18em;
@@ -85,45 +87,53 @@
 </head>
 <body>
   <header class="top">
-    <span class="brand"><img src="icon.svg" alt="" width="22" height="22" style="vertical-align:-5px;margin-right:7px">oauth3</span>
-    <a href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/oauth3/login">sign in ↗</a>
+    <span class="brand"><img src="icon.png" alt="" width="22" height="22" style="vertical-align:-5px;margin-right:7px">oauth3</span>
+    <a href="https://pod.dstack.soc1024.com/oauth3/login">sign in ↗</a>
   </header>
 
   <main class="wrap">
     <section class="hero">
       <h1>oauth3</h1>
-      <p class="tagline">Let apps read your accounts with a <b>scoped, revocable token</b> &mdash; never your cookies.</p>
+      <p class="tagline">Deploy an app that <b>proves to everyone who opens it</b> that it does exactly what you say.</p>
+      <p class="tagline sub">And hand any account you have to the <b>apps and agents you choose</b> &mdash; as much or as little as you want.</p>
     </section>
 
     <!-- LIVE first: the actual demo on Andrew's pod -->
     <section class="block">
       <h2>try it — live</h2>
       <div class="cards">
-        <a class="card" href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/otterscope/">
+        <a class="card" href="https://pod.dstack.soc1024.com/otterscope/">
           <div class="lbl">example app · live</div>
           <div class="name">Otter via OAuth3</div>
           <div class="desc">Click <em>Connect Otter</em>; your OAuth3 extension approves it and hands it a scoped token. It then lists and reads your Otter conversations through the instance — <strong>never your cookie</strong>.</div>
           <div class="go">open the app →</div>
         </a>
-        <a class="card" href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/feedling-web/">
+        <a class="card" href="https://pod.dstack.soc1024.com/timeline-peek/">
           <div class="lbl">example app · live</div>
-          <div class="name">Doomscroll notifier</div>
-          <div class="desc">Tracks your YouTube shorts and nudges you when you&rsquo;ve been scrolling too long.</div>
+          <div class="name">Timeline Peek</div>
+          <div class="desc">A logged-in browser <strong>inside the TEE</strong> reads a site for you — here, a peek at your X timeline. Your session lives in the sealed room; the app gets the read, never your cookie.</div>
           <div class="go">open the app →</div>
         </a>
-        <a class="card" href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/oauth3/login">
+        <a class="card" href="https://pod.dstack.soc1024.com/feedling-web/">
+          <div class="lbl">example app · live</div>
+          <div class="name">Doomscroll notifier</div>
+          <div class="desc">Tracks your YouTube shorts through the instance and nudges you when you&rsquo;ve been scrolling too long.</div>
+          <div class="go">open the app →</div>
+        </a>
+        <a class="card" href="https://pod.dstack.soc1024.com/oauth3/login">
           <div class="lbl">your account</div>
           <div class="name">Sign in</div>
-          <div class="desc">Sign in to the instance with a key only you hold (did:key) and manage which apps may read which accounts. Needs the <a href="https://github.com/teleport-computer/oauth3-extension">extension</a>.</div>
+          <div class="desc">Sign in to the instance — passkey, GitHub, or Google — and manage which apps may read which accounts. Syncing a site's cookies in needs the extension (linked below).</div>
           <div class="go">sign in →</div>
         </a>
       </div>
-      <p class="podnote">The instance runs on <strong>Andrew&rsquo;s personal TEE pod</strong> — a <a href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/">dstack tee-daemon</a> at <code>915c8197…dstack-pha-prod7.phala.network</code>. That pod <em>is</em> the oauth3 instance: the sealed room your cookies live in; apps read through it with a scoped token.</p>
+      <p class="podnote">The instance runs on <strong>Andrew&rsquo;s personal TEE pod</strong> — a <a href="https://pod.dstack.soc1024.com/">dstack tee-daemon</a> at <code>pod.dstack.soc1024.com</code>. That pod <em>is</em> the oauth3 instance: the sealed room your cookies live in; apps read through it with a scoped token. Curious how the in-TEE browser behind &ldquo;Login with everything&rdquo; works? <a href="browser-container.html">See the infographic →</a>.</p>
     </section>
 
     <section class="block">
       <h2>what it is</h2>
-      <p>Most of the web has no OAuth. To let an app use your account, you hand it your whole cookie jar — and everything that jar can do. oauth3 keeps the jar <strong>sealed in a TEE you control</strong> and hands each app only a <strong>narrow, revocable token</strong>: it can read what you approved, nothing more, and you can cut it off any time.</p>
+      <p>You build an app that reads people&rsquo;s accounts &mdash; watch history, meeting notes, whatever &mdash; push it to your pod and share the link, same as Vercel. The difference: it runs in an <strong>attested enclave</strong>. Where this is headed: anyone who opens the link can verify the running code is exactly what you published, and that it touches only the accounts and scopes you declared. You ask for access in plain words &mdash; <em>&ldquo;reads your watch history, nothing else&rdquo;</em> &mdash; and the deployment backs the claim. People say yes because your app is <strong>legible</strong>, not because they trust you. And you never hold their credential: it stays sealed in their instance, and your app reads through a scoped token. <a href="roadmap-2026-06-25.html" style="border-bottom:1px solid var(--accent);text-decoration:none">where the proof story is going &rarr;</a></p>
+      <p>For the people who use your app, the same machinery reads the other way: a handful of sites offer OAuth, but everywhere else, letting an app use your account is all-or-nothing &mdash; hand over your password, or your whole cookie jar. oauth3 turns any account you can log into into one you can <strong>delegate</strong>: pick what an app gets, a single read or the run of the account, and change your mind whenever.</p>
     </section>
 
     <section class="block">
@@ -168,7 +178,7 @@ oauth3 read  otter            <span class="c"># real data, no cookie</span></pre
 
     <section class="block">
       <h2>why trust it</h2>
-      <p>The instance runs inside a TEE — a sealed room the operator can&rsquo;t see into. The host is the <a href="https://915c8197b20b831c52cf97a9fb7e2e104cdc6ae8-8080.dstack-pha-prod7.phala.network/">tee-daemon</a>, which attests the exact code each app runs; an app (or the extension) can <strong>pin that measurement</strong> before trusting an instance — you trust the code, not the operator. A teleport experiment, with TinyCloud.</p>
+      <p>The instance runs inside a TEE — a sealed room the operator can&rsquo;t see into. The host is the <a href="https://pod.dstack.soc1024.com/">tee-daemon</a>, which attests the exact code each app runs; an app (or the extension) can <strong>pin that measurement</strong> before trusting an instance — you trust the code, not the operator. A teleport experiment, with TinyCloud.</p>
     </section>
 
     <section class="block">
