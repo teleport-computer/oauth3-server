@@ -704,6 +704,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "feed", bearer); if (denied) return denied;
     const subj = t ? (t.subject ?? "owner") : "owner";
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
@@ -712,6 +713,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
     try {
       const { who, items } = await browserFeed(browserSpiUrl, plugin, jar, target, browserSpiSecret);
+      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
       await audit("feed", { plugin: plugin.id, count: items.length, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, who, items });
     } catch (e) {
@@ -760,12 +762,14 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "live", bearer); if (denied) return denied;
     const subj = t ? (t.subject ?? "owner") : "owner";
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     try {
       const data = await plugin.live(jar, Number(url.searchParams.get("after") || "0") || 0);
+      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
       await audit("live", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, data });
     } catch (e) {
@@ -783,6 +787,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "frame", bearer); if (denied) return denied;
     const subj = t ? (t.subject ?? "owner") : "owner";
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
@@ -792,6 +797,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     catch { return json({ error: "bad frame url" }, 400); }
     try {
       const { bytes, contentType } = await plugin.fetchFrame(jar, target);
+      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
       return new Response(bytes as unknown as BodyInit, { headers: { "Content-Type": contentType, "Access-Control-Allow-Origin": "*" } });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
