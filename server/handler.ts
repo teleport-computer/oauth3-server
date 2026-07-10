@@ -836,7 +836,11 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     // cleared by recordTokenUse below only after a successful read.
 
     try {
-      const data = m[2] ? await plugin.fetchItem(jar, decodeURIComponent(m[2])) : await plugin.listItems(jar);
+      const listOpts = {
+        page: url.searchParams.get("page") ? Number(url.searchParams.get("page")) : undefined,
+        pageSize: url.searchParams.get("page_size") ? Number(url.searchParams.get("page_size")) : undefined,
+      };
+      const data = m[2] ? await plugin.fetchItem(jar, decodeURIComponent(m[2])) : await plugin.listItems(jar, listOpts);
       // Record token use after successful read (marks first-use as consumed)
       if (t && !isOwner(req)) {
         recordTokenUse(bearer, plugin.id);

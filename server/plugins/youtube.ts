@@ -9,7 +9,7 @@
 //                            Shorts live now; missing it = no Shorts at all)
 // Field paths shift between YouTube builds, so each extractor tries a couple of fallbacks.
 
-import { cookieHeader, Jar, Plugin, PluginItem } from "./types.ts";
+import { cookieHeader, Jar, Plugin, PluginItem, PluginListOptions } from "./types.ts";
 import { egressFetch } from "../egress.ts";
 
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
@@ -75,7 +75,7 @@ export const youtubePlugin: Plugin = {
     return !!(jar["SAPISID"] || jar["__Secure-3PAPISID"]);
   },
 
-  async listItems(jar: Jar): Promise<PluginItem[]> {
+  async listItems(jar: Jar, _opts?: PluginListOptions): Promise<PluginItem[]> {
     const r = await egressFetch("https://www.youtube.com/feed/history", {
       headers: {
         "Cookie": cookieHeader(jar),

@@ -14,6 +14,10 @@ export interface PluginItem {
   meta?: Record<string, unknown>;
 }
 
+export interface PluginListOptions {
+  page?: number;
+  pageSize?: number;
+}
 // Account-level data — identity + named stats for the logged-in account (e.g. Reddit
 // username + karma breakdown). The narrow renderable surface behind a scope ingredient
 // like `reddit:karma`; returned by GET /api/:plugin/account.
@@ -34,7 +38,7 @@ export interface Plugin {
   cookieDomains: string[]; // extension grabs the WHOLE jar for these, e.g. [".otter.ai"]
   renderUrl?: string; // page to load for /screenshot; defaults to https://www.<cookieDomain>
   loggedIn(jar: Jar): boolean; // cheap presence check on a key cookie
-  listItems(jar: Jar): Promise<PluginItem[]>;
+  listItems(jar: Jar, opts?: PluginListOptions): Promise<PluginItem[]>;
   fetchItem(jar: Jar, id: string): Promise<unknown>;
   // Optional account-level read: identity + stats for the logged-in account (e.g. Reddit
   // username + karma breakdown). The narrow surface behind a scope ingredient like

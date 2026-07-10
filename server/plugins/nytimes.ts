@@ -10,7 +10,7 @@
 // the 403 and throws a clear browser-path error rather than pretending. This is the
 // canonical example of the ROADMAP's "needs a browser carrying the cookie" axis.
 
-import { cookieHeader, Jar, Plugin, PluginItem } from "./types.ts";
+import { cookieHeader, Jar, Plugin, PluginItem, PluginListOptions } from "./types.ts";
 
 const HASH = "baf36839d2052b17fce453a21ccf5bd8057d075730e848e9f0e61ec193daa5c5";
 const NYT_TOKEN = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAs+/oUCTBmD/cLdmcecrnBMHiU/pxQCn2DDyaPKUOXxi4p0uUSZQzsuq1pJ1m5z1i0YGPd1U1OeGHAChWtqoxC7bFMCXcwnE1oyui9G1uobgpm1GdhtwkR7ta7akVTcsF8zxiXx7DNXIPd2nIJFH83rmkZueKrC4JVaNzjvD+Z03piLn5bHWU6+w+rA+kyJtGgZNTXKyPh6EC6o5N+rknNMG5+CdTq35p8f99WjFawSvYgP9V64kgckbTbtdJ6YhVP58TnuYgr12urtwnIqWP9KSJ1e5vmgf3tunMqWNm6+AnsqNj8mCLdCuc5cEB74CwUeQcP2HQQmbCddBy2y0mEwIDAQAB"; // public project-vi app token, captured 2026-06-24 (may rotate)
@@ -49,7 +49,7 @@ export const nytimesPlugin: Plugin = {
     return !!jar["NYT-S"];
   },
 
-  async listItems(jar: Jar): Promise<PluginItem[]> {
+  async listItems(jar: Jar, _opts?: PluginListOptions): Promise<PluginItem[]> {
     const edges = await readingList(jar, 50);
     return edges.map((e: any): PluginItem => {
       const n = e?.node ?? {};

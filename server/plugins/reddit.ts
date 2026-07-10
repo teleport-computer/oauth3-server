@@ -9,7 +9,7 @@
 // ingredient — identity (username) + karma breakdown. (v1 lists the first page,
 // limit=100; pagination via `after` is a TODO.)
 
-import { cookieHeader, Jar, Plugin, PluginAccount, PluginItem } from "./types.ts";
+import { cookieHeader, Jar, Plugin, PluginAccount, PluginItem, PluginListOptions } from "./types.ts";
 
 // Live Reddit web API base. Override via REDDIT_BASE (e2e/mock) through
 // configureReddit(); never read Deno.env at module top level (the isolated container
@@ -56,7 +56,7 @@ export const redditPlugin: Plugin = {
     return !!jar["reddit_session"];
   },
 
-  async listItems(jar: Jar): Promise<PluginItem[]> {
+  async listItems(jar: Jar, _opts?: PluginListOptions): Promise<PluginItem[]> {
     const name = await username(jar);
     const j = await getJSON(`/user/${encodeURIComponent(name)}/saved.json?limit=100&raw_json=1`, jar);
     return (j?.data?.children ?? []).map((c: any): PluginItem => {
