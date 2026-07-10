@@ -7,8 +7,9 @@
 //   DELETE /api/tokens/:token                 owner — revoke a token
 //   GET    /api/audit                         owner — audit log
 //   GET    /api/promote                       owner — proposed scope ingredients from observed reads
-//   GET    /api/scopes                        public — enforced scope-ingredient ledger (label = shown scope)
+//   GET    /api/scopes                        public — enforced scope-ingredient ledger + app consumes/offers (#88)
 //   GET    /api/scopes/:id                    public — one enforced ingredient (404 if unknown)
+//   GET    /scopes                            public — the composable-utilities panel (rendered view of /api/scopes, #88)
 //   POST   /api/connect   {plugin,subject?,app?}   app — start the grant handshake
 //   GET    /api/connect/:requestId            app — poll status (token once approved)
 //   POST   /api/connect/:requestId/approve|deny  owner_secret — the user's decision
@@ -33,6 +34,7 @@ import { approvePage } from "./approve-page.ts";
 import { appPage } from "./app-page.ts";
 import { loginPage } from "./login-page.ts";
 import { dashboardPage } from "./dashboard-page.ts";
+import { scopesPage } from "./scopes-page.ts";
 import { evidencePage, homePage, privacyPage, termsPage } from "./home-page.ts";
 import { createSession, destroySession, initSessions, verifySession } from "./sessions.ts";
 import { newChallenge, verifyDidSignIn } from "./identity.ts";
@@ -44,7 +46,7 @@ import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.
 import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot, browserFeed } from "./browser.ts";
 import { apiLike, apiMe, apiTimeline, apiTweet, apiUnlike, browserTrace } from "./twitter-actions.ts";
-import { pluginCapabilities, scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
+import { appDeclarations, pluginCapabilities, scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
 import { proposeIngredients } from "./promoter.ts";
 import { approveChallenge, createChallenge, denyChallenge, getChallenge, recordTokenUse, score, wasFirstUse } from "./stepup.ts";
 
@@ -166,6 +168,12 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   // connected apps, synced sites, and activity scoped to your subject.
   if (req.method === "GET" && (path === "/dashboard" || path === "/dashboard/")) {
     return html(dashboardPage());
+  }
+  // #88: the composition panel — renders the pod as composable capability-utilities from the
+  // SAME ledger functions GET /api/scopes serves (single source, can't drift). Public: the
+  // consumed labels are the enforced gate sentences and the ingredient list is already public.
+  if (req.method === "GET" && (path === "/scopes" || path === "/scopes/")) {
+    return html(scopesPage());
   }
 
   // --- web sign-in (so you approve apps without re-pasting the owner secret) ---
@@ -447,8 +455,11 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   // the scope sentence shown to a user MUST come from here, not an app-authored string, so
   // the displayed claim is provably what's enforced at the gate (#73). An app fetching this
   // pre-approval has no token yet; the labels are not secret (they appear in gate 403s).
+  // #88: the ledger now also carries the app → {consumes, offers} composition graph. Each
+  // consumed id is resolved to its enforced ingredient record (no drift), so the UX layer can
+  // render the pod as composable capability-utilities straight from this one public source.
   if (req.method === "GET" && path === "/api/scopes") {
-    return json({ scopes: scopeIngredients(), plugins: pluginCapabilities() });
+    return json({ scopes: scopeIngredients(), plugins: pluginCapabilities(), apps: appDeclarations() });
   }
   const scopeMatch = path.match(/^\/api\/scopes\/(.+)$/);
   if (req.method === "GET" && scopeMatch) {

@@ -19,6 +19,22 @@ export const SCOPE_INGREDIENTS: Record<string, { plugin: string; reads: string[]
       label:
         "read-only · your Reddit account identity (username) and karma (comment + link) · not your saved posts, feed, votes, or messages",
     },
+    // #88: novel consumed scopes seeded by the composable utilities (feedling, calendar-share).
+    // Each maps to a real read chokepoint in handler.ts, so a token carrying the cap is
+    // confined exactly like otter:live-follow / reddit:karma — the consumed claim is enforced,
+    // not hollow (RFC 0004).
+    "youtube:history": {
+      plugin: "youtube",
+      reads: ["feed"], // the /feed reconstruction of watch history (videos + Shorts)
+      label:
+        "read-only · your watch history (videos and Shorts) · not your subscriptions, likes, comments, playlists, or uploads",
+    },
+    "calendar:free-busy": {
+      plugin: "google-calendar",
+      reads: ["items"], // the upcoming-events list (the free/busy surface) via /items
+      label:
+        "read-only · your upcoming events (the free/busy surface) · not event bodies or attendees, and no writes",
+    },
   };
 
 // Per-plugin capability statements (RFC 0009 step 1) — the operator-authored sentence shown
@@ -81,6 +97,89 @@ export function scopeIngredient(
 ): { id: string; plugin: string; reads: string[]; label: string } | undefined {
   const ing = SCOPE_INGREDIENTS[id];
   return ing ? { id, ...ing } : undefined;
+}
+
+// --- App scope declarations (#88): apps declare what they CONSUME and OFFER. ---
+// A utility declares the enforced scope ingredient(s) it CONSUMES (ids that MUST resolve to
+// SCOPE_INGREDIENTS above — anti-hollow-green: the consumed claim is provably what the gate
+// enforces, never a second app-authored string) and, where it derives a new capability, the
+// novel scope it OFFERS. Offers are app-declared PRODUCTS (a digest, a recap) computed from
+// consumed reads — NOT gate-enforced endpoint reads — so their labels are app-authored and
+// surfaced as such, distinct from the enforced consumed labels. This is what lets a reviewer
+// read the pod as a set of composable capability-utilities rather than one-off demos.
+export interface AppOffer {
+  id: string; // the novel scope this app produces (e.g. "feedling:digest")
+  label: string; // app-authored description of the derived capability
+}
+export interface AppDeclaration {
+  id: string; // app id (matches ConnectReq.app / listing id)
+  name: string; // human label for the card
+  consumes: string[]; // enforced scope-ingredient ids (each must be in SCOPE_INGREDIENTS)
+  offers: AppOffer[]; // novel scopes this app produces (declared, not gate-enforced)
+  note?: string; // one-line composition sentence for the reviewer
+}
+export const APP_DECLARATIONS: AppDeclaration[] = [
+  {
+    id: "feedling",
+    name: "Feedling — watch-history digest",
+    consumes: ["youtube:history"],
+    offers: [
+      { id: "feedling:digest", label: "a daily digest of what you watched (videos vs Shorts), derived from your history" },
+    ],
+    note: "reads your YouTube watch history; emits a derived digest no other app can see",
+  },
+  {
+    id: "otterpilot",
+    name: "OtterPilot — live-meeting recap",
+    consumes: ["otter:live-follow"],
+    offers: [
+      { id: "otterpilot:recap", label: "a recap of the current live meeting, derived from live segments + shared-screen frames" },
+    ],
+    note: "follows the currently-live meeting only; emits a derived recap",
+  },
+  {
+    id: "reddit-karma",
+    name: "Reddit karma — account read",
+    consumes: ["reddit:karma"],
+    offers: [],
+    note: "reads your account identity + karma only; a pure consumer (no offers)",
+  },
+  {
+    id: "calendar-share",
+    name: "Calendar share — free/busy",
+    consumes: ["calendar:free-busy"],
+    offers: [],
+    note: "the clearest novel-scope candidate: your upcoming free/busy, nothing else",
+  },
+];
+
+// A consumed scope resolved against the enforced ledger. enforced:false (not silently dropped)
+// when an app names an id that isn't in SCOPE_INGREDIENTS — the operator sees the gap instead
+// of a hollow claim.
+export interface AppConsumedScope {
+  id: string;
+  enforced: boolean;
+  plugin?: string;
+  reads?: string[];
+  label?: string;
+}
+export interface ResolvedAppDeclaration extends AppDeclaration {
+  consumedScopes: AppConsumedScope[]; // consumes[], resolved to the enforced ingredient records
+}
+
+// The app → {consumes, offers} composition graph, each consumed id resolved to its enforced
+// ingredient record so the UX layer renders the gate-enforced label (no drift). Surfaced at
+// GET /api/scopes alongside the ingredient + plugin ledgers (one public source).
+export function appDeclarations(): ResolvedAppDeclaration[] {
+  return APP_DECLARATIONS.map((a) => ({
+    ...a,
+    consumedScopes: a.consumes.map((id) => {
+      const ing = SCOPE_INGREDIENTS[id];
+      return ing
+        ? { id, enforced: true, plugin: ing.plugin, reads: ing.reads, label: ing.label }
+        : { id, enforced: false };
+    }),
+  }));
 }
 
 // null = unrestricted (no scope ingredient present). Otherwise the union of allowed reads.
