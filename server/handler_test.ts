@@ -3,6 +3,8 @@
 
 import handler from "./handler.ts";
 import { assertEquals, assertExists } from "jsr:@std/assert@~1.0.0";
+import { getPlugin } from "./plugins/registry.ts";
+import { setJar } from "./vault.ts";
 
 const TEST_ENV = {
   OAUTH3_OWNER_SECRET: "test-owner-secret",
@@ -194,4 +196,61 @@ Deno.test("handler returns signedIn:false for /api/me without auth", async () =>
   if (res.status !== 200) { await res.body?.cancel(); throw new Error(`expected 200, got ${res.status}`); }
   const body = await res.json();
   if (body.signedIn !== false) throw new Error(`expected signedIn:false, got ${body.signedIn}`);
+});
+
+// --- issue #95: GET /api/:plugin/items response shape ---
+// The list is exposed under `items` (preferred — matches the endpoint name + listItems)
+// AND under `data` (back-compat alias still consumed by oauth3-sdk, cli.ts, app-page.ts
+// and otterscope). The single-item path stays {plugin, data:<item>}.
+Deno.test("handler: GET /api/:plugin/items returns list under `items` AND `data` (alias) — #95", async () => {
+  const plugin = getPlugin("otter")!;
+  const origLoggedIn = plugin.loggedIn;
+  const origListItems = plugin.listItems;
+  const fakeItems = [
+    { id: "a", title: "Alpha", date: "2026-07-10" },
+    { id: "b", title: "Beta" },
+  ];
+  // Stub the networked collaborator only — the handler's routing/auth/gate/audit/shape
+  // run for real. Restore in finally so other tests are unaffected.
+  plugin.loggedIn = () => true;
+  plugin.listItems = () => Promise.resolve(fakeItems);
+  try {
+    await setJar("owner", "otter", { session: "x" });
+    const { status, json } = await ownerReq("GET", "/api/otter/items");
+    assertEquals(status, 200);
+    const body = json as Record<string, unknown>;
+    assertEquals(body.plugin, "otter");
+    // `items` is the preferred key …
+    assertEquals(Array.isArray(body.items), true);
+    assertEquals(body.items, fakeItems);
+    // … and `data` is a back-compat alias carrying the same payload.
+    assertEquals(Array.isArray(body.data), true);
+    assertEquals(body.data, fakeItems);
+    assertEquals(JSON.stringify(body.items), JSON.stringify(body.data));
+  } finally {
+    plugin.loggedIn = origLoggedIn;
+    plugin.listItems = origListItems;
+  }
+});
+
+Deno.test("handler: GET /api/:plugin/items/:id returns single item under `data` (no `items`) — #95", async () => {
+  const plugin = getPlugin("otter")!;
+  const origLoggedIn = plugin.loggedIn;
+  const origFetchItem = plugin.fetchItem;
+  const one = { id: "a", transcript: "hello world" };
+  plugin.loggedIn = () => true;
+  plugin.fetchItem = () => Promise.resolve(one);
+  try {
+    await setJar("owner", "otter", { session: "x" });
+    const { status, json } = await ownerReq("GET", "/api/otter/items/a");
+    assertEquals(status, 200);
+    const body = json as Record<string, unknown>;
+    assertEquals(body.plugin, "otter");
+    assertEquals(body.data, one);
+    // single-item shape must not leak an `items` key
+    assertEquals("items" in body, false);
+  } finally {
+    plugin.loggedIn = origLoggedIn;
+    plugin.fetchItem = origFetchItem;
+  }
 });
