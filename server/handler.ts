@@ -914,5 +914,83 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     }
   }
 
+  if (req.method === "POST" && path === "/api/ctxauth-demo") {
+    const rid = crypto.randomUUID().slice(0, 8);
+    const app = `ctxauth-demo-${rid}`;
+    const sameSet = (a: string[], b: string[]) =>
+      a.length === b.length && [...a].sort().join() === [...b].sort().join();
+    const trace: unknown[] = [];
+    const broad = await mint("reddit", "demo", app);
+    trace.push({
+      n: 1,
+      step: "broad grant",
+      detail: `app '${app}' is minted an UNRESTRICTED reddit token`,
+      scope: "none — reads account · items/saved · feed · screenshot",
+      ok: true,
+    });
+    for (let i = 0; i < 3; i++) {
+      await audit("gate", { plugin: "reddit", readKind: "account", decision: "allow", by: app });
+    }
+    trace.push({
+      n: 2,
+      step: "observed use",
+      detail: "the app read /account ×3 — the gate logged each as an allowed 'account' read",
+      ok: true,
+    });
+    const p = proposeIngredients(auditLog()).find((x) =>
+      (x.app || "") === app && x.plugin === "reddit"
+    );
+    trace.push({
+      n: 3,
+      step: "promoter proposes",
+      detail: `deterministically, from the audit trail, '${app}' only ever needed:`,
+      scope: p?.proposed_ingredient?.name,
+      label: p?.proposed_ingredient?.label,
+      observations: p?.observations,
+      ok: !!p,
+    });
+    const match = scopeIngredients().find((s) =>
+      s.plugin === "reddit" && p && sameSet(s.reads, p.proposed_ingredient.reads)
+    );
+    const tightIng = match?.id;
+    const tight = tightIng ? await mint("reddit", "demo", app, [tightIng]) : null;
+    await revoke(broad.token);
+    trace.push({
+      n: 4,
+      step: "tighten (re-mint)",
+      detail: tightIng
+        ? `re-minted → confined to ${tightIng}; the broad token is revoked`
+        : "no registered scope matches yet — a human curates the draft into scopes.ts first",
+      scope: tightIng,
+      label: tightIng ? scopeIngredient(tightIng)?.label : null,
+      ok: !!tightIng,
+    });
+    const allowed = scopeReads(tight?.caps);
+    const itemsDenied = !!(allowed && !allowed.has("items"));
+    const accountAllowed = !allowed || allowed.has("account");
+    trace.push({
+      n: 5,
+      step: "enforced",
+      detail: "with the tightened token, the gate now decides:",
+      lines: [
+        {
+          read: "GET /api/reddit/items",
+          verdict: itemsDenied
+            ? `403 · scope: may read ${[...(allowed || [])].join("+")} only, not items`
+            : "allowed",
+          denied: itemsDenied,
+        },
+        {
+          read: "GET /api/reddit/account",
+          verdict: accountAllowed ? "passes the scope" : "403",
+          denied: !accountAllowed,
+        },
+      ],
+      ok: itemsDenied && accountAllowed,
+    });
+    if (tight) await revoke(tight.token);
+    return json({ app, trace, closed: itemsDenied && accountAllowed });
+  }
+
   return new Response("not found", { status: 404 });
 }

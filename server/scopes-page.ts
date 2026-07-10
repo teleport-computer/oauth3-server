@@ -110,5 +110,46 @@ ${ledgerTable()}
 
 <div class=halftone aria-hidden=true></div>
 <footer><a href="./">Home</a><a href="dashboard">Account</a><a href="api/scopes">JSON ledger</a></footer>
+<h2>Contextual authorization — the feedback loop</h2>
+<div class=loop>
+  <p>A grant does not have to be guessed up front. An app connects broadly, the gate <b>observes</b> what it actually reads, the promoter <b>proposes</b> the smallest scope admitting exactly that, and the token is <b>re-minted</b> tighter — deterministically, no model in the loop, no intent leaked anywhere.</p>
+  <div class=flow><span>broad grant</span><i>→</i><span>gate observes reads</span><i>→</i><span>promoter proposes scope</span><i>→</i><span>tighten (re-mint)</span><i>→</i><span>out-of-scope read now 403</span></div>
+  <button id=run>▶ Run the loop live</button>
+  <div id=trace></div>
+</div>
+</div>
+<script>
+const stepEl=(s)=>{
+  const box=document.createElement('div'); box.className='tstep '+(s.ok?'ok':'no');
+  let scope=s.scope?'<span class="pill prop">'+s.scope+'</span>':'';
+  let obs=s.observations?'<span class=obs>'+s.observations+' observed reads</span>':'';
+  let lab=s.label?'<div class=tlab>"'+s.label+'"</div>':'';
+  let lines='';
+  if(s.lines)for(const l of s.lines)lines+='<div class=tline><span class=mono>'+l.read+'</span> → <b class="'+(l.denied?'r':'g')+'">'+l.verdict+'</b></div>';
+  box.innerHTML='<div class=thead><span class=tn>'+s.n+'</span><b>'+s.step.toUpperCase()+'</b> '+scope+' '+obs+'</div><div class=tdetail>'+s.detail+'</div>'+lab+lines;
+  return box;
+};
+document.getElementById('run').onclick=async()=>{
+  const t=document.getElementById('trace'); t.innerHTML=''; document.getElementById('run').disabled=true;
+  const r=await(await fetch('api/ctxauth-demo',{method:'POST'})).json();
+  for(let i=0;i<r.trace.length;i++){await new Promise(x=>setTimeout(x,550));t.appendChild(stepEl(r.trace[i]));}
+  const v=document.createElement('div'); v.className='verdict '+(r.closed?'ok':'no');
+  v.textContent=r.closed?'✓ LOOP CLOSED — broad grant → observed → proposed → tightened → over-broad read denied, in-scope read allowed.':'✗ loop did not close';
+  t.appendChild(v); document.getElementById('run').disabled=false;
+};
+</script>
+<style>
+#run{font:inherit;font-weight:700;border:2px solid var(--ink);background:var(--pink);color:#fff;padding:8px 16px;cursor:pointer;text-transform:uppercase;letter-spacing:.03em;box-shadow:3px 3px 0 var(--teal);margin-top:12px}
+#run:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--teal)}#run:disabled{opacity:.5}
+.tstep{border:1.5px solid var(--hair);border-left:4px solid var(--teal);background:#fff;padding:9px 13px;margin-top:8px;animation:sl .35s ease}
+.tstep.no{border-left-color:var(--fail)}
+@keyframes sl{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
+.thead{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.thead b{font-size:13px;letter-spacing:.04em}
+.tn{font-family:ui-monospace,Menlo,monospace;font-size:11px;background:var(--teal);color:#fff;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;border-radius:3px}
+.tdetail{color:var(--mut);font-size:13.5px;margin-top:3px}.tlab{color:#33403f;font-size:12.5px;margin-top:3px;font-style:italic}
+.tline{font-size:13px;margin-top:4px}.tline b.r{color:var(--fail)}.tline b.g{color:var(--pass)}
+.verdict{margin-top:12px;padding:10px 14px;border:2px solid var(--ink);font-weight:700;font-size:14px}
+.verdict.ok{background:#e6f5f0;color:var(--pass)}.verdict.no{background:#fff0f0;color:var(--fail)}
+</style>
 </body></html>`;
 }
