@@ -423,13 +423,17 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
 
   // --- tokens ---
   if (req.method === "POST" && path === "/api/tokens") {
-    const subj = subjectOf();
-    if (!subj) return json({ error: "unauthorized" }, 401);
+    const acting = subjectOf();
+    if (!acting) return json({ error: "unauthorized" }, 401);
     const body = await req.json().catch(() => null) as any;
     if (!getPlugin(body?.plugin)) return json({ error: "unknown plugin" }, 404);
-    const t = await mint(body.plugin, subj, body.app); // bound to the minter's jar
-    await audit("token.mint", { plugin: t.plugin, subject: t.subject, app: t.app });
-    return json({ token: t.token, plugin: t.plugin, subject: t.subject });
+    // Default: bound to the minter's own jar. The OWNER (admin over the vault) may mint a token
+    // for another subject's jar by passing `subject` — e.g. to issue an app a read token for a
+    // signed-in user's synced jar without impersonating them.
+    const subj = (acting === "owner" && body?.subject) ? String(body.subject) : acting;
+    const t = await mint(body.plugin, subj, body.app, Array.isArray(body?.caps) ? body.caps : undefined);
+    await audit("token.mint", { plugin: t.plugin, subject: t.subject, app: t.app, caps: t.caps });
+    return json({ token: t.token, plugin: t.plugin, subject: t.subject, caps: t.caps ?? null });
   }
   if (req.method === "GET" && path === "/api/tokens") {
     const subj = subjectOf();
