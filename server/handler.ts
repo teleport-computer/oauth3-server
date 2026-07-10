@@ -16,6 +16,8 @@
 //   GET    /approve/:requestId                HTML approval screen
 //   GET    /api/:plugin/account              scoped token OR owner — account-level data (identity + karma)
 //   GET    /api/:plugin/items[/:id]           scoped token OR owner — read
+//        list (/items)    → {plugin, items:[{id,title,date?,meta?}], data:items}  (prefer `items`; `data` is a back-compat alias)
+//        one   (/items/:id) → {plugin, data:<item>}
 //   GET    /api/:plugin/live[?after=N]        scoped token OR owner — live item segments + frame urls
 //   GET    /api/:plugin/frame?u=<b64url>      scoped token OR owner — proxy one shared-screen image (binary)
 //   GET    /api/:plugin/screenshot            scoped token OR owner — logged-in render via Browser SPI
@@ -844,13 +846,24 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
         page: url.searchParams.get("page") ? Number(url.searchParams.get("page")) : undefined,
         pageSize: url.searchParams.get("page_size") ? Number(url.searchParams.get("page_size")) : undefined,
       };
-      const data = m[2] ? await plugin.fetchItem(jar, decodeURIComponent(m[2])) : await plugin.listItems(jar, listOpts);
-      // Record token use after successful read (marks first-use as consumed)
-      if (t && !isOwner(req)) {
-        recordTokenUse(bearer, plugin.id);
+      // Response shape (issue #95): a single item (/items/:id) is {plugin, data:<item>};
+      // the list (/items) is {plugin, items:[...], data:items} — `items` matches the
+      // endpoint name + listItems, `data` is a back-compat alias still read by oauth3-sdk,
+      // cli.ts, app-page.ts and otterscope. Prefer `items` in new code.
+      const recordUse = () => {
+        if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      };
+      const by = t ? (t.app || t.subject || "token") : "owner";
+      if (m[2]) {
+        const data = await plugin.fetchItem(jar, decodeURIComponent(m[2]));
+        recordUse();
+        await audit("read", { plugin: plugin.id, item: m[2], by });
+        return json({ plugin: plugin.id, data });
       }
-      await audit("read", { plugin: plugin.id, item: m[2] || "list", by: t ? (t.app || t.subject || "token") : "owner" });
-      return json({ plugin: plugin.id, data });
+      const items = await plugin.listItems(jar, listOpts);
+      recordUse();
+      await audit("read", { plugin: plugin.id, item: "list", by });
+      return json({ plugin: plugin.id, items, data: items });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
     }
