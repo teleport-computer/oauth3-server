@@ -181,3 +181,17 @@ Deno.test("handler: audit log records connect.refuse (AC5)", async () => {
 });
 
 console.log("All handler tests passed.");
+
+// --- from #34 (staging-oa-33): generic route/auth smoke tests ---
+Deno.test("handler returns 404 for unknown routes", async () => {
+  const res = await handler(new Request("http://localhost/api/unknown-route"), { env: {}, dataDir: "" });
+  await res.body?.cancel();
+  if (res.status !== 404) throw new Error(`expected 404, got ${res.status}`);
+});
+
+Deno.test("handler returns signedIn:false for /api/me without auth", async () => {
+  const res = await handler(new Request("http://localhost/api/me"), { env: {}, dataDir: "" });
+  if (res.status !== 200) { await res.body?.cancel(); throw new Error(`expected 200, got ${res.status}`); }
+  const body = await res.json();
+  if (body.signedIn !== false) throw new Error(`expected signedIn:false, got ${body.signedIn}`);
+});
