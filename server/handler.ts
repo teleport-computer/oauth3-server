@@ -42,6 +42,7 @@ import { allCredentialIds, credentialsFor, initPasskeys, passkeyChallenge, verif
 import { consumeState, enabledProviders, githubAuthUrl, githubEnv, githubExchange, googleAuthUrl, googleEnv, googleExchange, newState } from "./oidc.ts";
 import { configureOtter } from "./plugins/otter.ts";
 import { configureReddit } from "./plugins/reddit.ts";
+import { configureAmazon } from "./plugins/amazon.ts";
 import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.ts";
 import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot, browserFeed } from "./browser.ts";
@@ -69,6 +70,7 @@ async function init(env: Record<string, string>, dataDir: string) {
   await initLinks(dataDir);
   configureOtter(env);
   configureReddit(env);
+  configureAmazon(env);
   await initListings(dataDir);
   await initEval(dataDir);
   ownerSecret = env.OWNER_SECRET || env.OAUTH3_OWNER_SECRET || env.EXT_SHARED_SECRET || "";
