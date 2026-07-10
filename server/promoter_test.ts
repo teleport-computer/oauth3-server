@@ -1,8 +1,8 @@
 // Scope-ingredient promotion — the 4th self-improvement loop.
-// These tests prove clustering -> proposal on a FIXTURE of gate audit events (the live audit
-// corpus is currently thin: handler.ts only emits read-kinds "items"/"screenshot", and the
-// otter "live"/"frame" endpoints aren't wired yet). The fixture stands in for that corpus,
-// per oauth3-server#72's scope-down rule. Honesty about corpus size is asserted via
+// These tests prove clustering -> proposal on a FIXTURE of gate audit events. handler.ts now
+// gates every read chokepoint (items, screenshot, account, live, frame, feed — #87 item 2),
+// so a live otter corpus of live/frame gate events IS real; the fixture here keeps the
+// clustering unit-test hermetic and deterministic. Honesty about corpus size is asserted via
 // `observations`, and the loop-closure signal (a cluster already captured by an existing
 // ingredient) is asserted for the otter:live-follow worked example.
 

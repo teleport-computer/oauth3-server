@@ -7,6 +7,9 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { pluginCapabilities, pluginCapability, scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
 import { mint } from "./tokens.ts";
+import { auditLog } from "./audit.ts";
+import { recordTokenUse } from "./stepup.ts";
+import { proposeIngredients } from "./promoter.ts";
 import { approvePage } from "./approve-page.ts";
 import type { ConnectReq } from "./connect.ts";
 import handler from "./handler.ts";
@@ -157,4 +160,72 @@ Deno.test("handler GET /api/scopes — ledger also surfaces the plugin statement
   const ot = body.plugins.find((p: { plugin: string }) => p.plugin === "otter");
   assert(ot, "ledger lists the otter capability statement");
   assert((ot.statement as string).includes("otter.ai"));
+});
+
+// --- #87 item 2: /live, /frame, and /feed are now gated read chokepoints. Before this, the
+// two reads named by otter:live-follow (live, frame) were UNGATED — a scoped token was
+// unenforceable there and no `gate` audit accrued, so the promoter's otter corpus was empty
+// (its tests used a fixture stand-in; see promoter_test.ts). Now gateRead confines + audits
+// every read chokepoint, so the contextual-authz feedback loop's audit source is real. ---
+Deno.test("handler GET /api/otter/{live,frame,feed} — read-scope gating + audit", async () => {
+  const ctx = { env: { OWNER_SECRET: "test-owner-secret-live" }, dataDir: "" }; // in-memory: no scheduler, no SEAL_KEY
+  const liveFollow = await mint("otter", "owner", "lf", ["otter:live-follow"]);
+  // An otter token scoped to a cap whose reads EXCLUDE live/frame — proves the new gate can
+  // DENY. scopeReads(["reddit:karma"]) = {account}, so live/frame/feed are out of scope.
+  const karmaOnly = await mint("otter", "owner", "ko", ["reddit:karma"]);
+  const legacy = await mint("otter", "owner", "reader"); // no caps = unrestricted
+
+  const get = (p: string, bearer: string) =>
+    handler(
+      new Request(`http://localhost${p}`, { headers: { Authorization: `Bearer ${bearer}` } }),
+      ctx,
+    );
+
+  // live-follow PASSES the scope gate at its named reads (/live, /frame): 409 = first-use
+  // step-up challenge or no-jar, NOT a 403 scope denial.
+  assert((await get("/api/otter/live", liveFollow.token)).status !== 403, "live-follow may read /live");
+  assert((await get("/api/otter/frame", liveFollow.token)).status !== 403, "live-follow may read /frame");
+
+  // A token whose scope excludes the read is DENIED there — the security property the gate adds.
+  const dLive = await get("/api/otter/live", karmaOnly.token);
+  assertEquals(dLive.status, 403);
+  assert((await dLive.text()).includes("not live"), "scope error names the excluded read");
+  const dFrame = await get("/api/otter/frame", karmaOnly.token);
+  assertEquals(dFrame.status, 403);
+  assert((await dFrame.text()).includes("not frame"), "scope error names the excluded read");
+
+  // /feed is now gated too (readKind "feed"): live-follow's scope doesn't grant it -> 403;
+  // an unscoped (legacy) token passes the scope gate there (backward compat).
+  assertEquals((await get("/api/otter/feed", liveFollow.token)).status, 403);
+  assert((await get("/api/otter/feed", legacy.token)).status !== 403, "legacy token unrestricted at /feed");
+
+  // Backward compat: a legacy (no-cap) token passes the scope gate at /live (409, not 403).
+  assert((await get("/api/otter/live", legacy.token)).status !== 403, "legacy token unrestricted at /live");
+
+  // The corpus is now REAL. Clear live-follow's first-use (simulating a returning token whose
+  // step-up challenge was already satisfied) so its /live + /frame reads PASS the gate and emit
+  // `gate` ALLOW audits — the events the promoter clusters on. Before this change those reads
+  // were UNGATED and emitted no gate event, so the promoter's otter corpus was empty (its tests
+  // used a fixture stand-in; see promoter_test.ts).
+  recordTokenUse(liveFollow.token, "otter");
+  await get("/api/otter/live", liveFollow.token);
+  await get("/api/otter/frame", liveFollow.token);
+  const events = auditLog();
+  const allow = (readKind: string) =>
+    events.some(
+      (e) =>
+        e.action === "gate" &&
+        (e.detail as Record<string, unknown>).plugin === "otter" &&
+        (e.detail as Record<string, unknown>).readKind === readKind &&
+        (e.detail as Record<string, unknown>).decision === "allow",
+    );
+  assert(allow("live"), "gate emits an otter/live allow event");
+  assert(allow("frame"), "gate emits an otter/frame allow event");
+
+  // End-to-end money shot: the promoter proposes otter:live-follow from the REAL audit corpus
+  // (no fixture) — the contextual-authz feedback loop's audit source is now wired.
+  const lfProposal = proposeIngredients(events).find((p) => p.app === "lf");
+  assert(lfProposal, "promoter clusters lf's otter reads");
+  assertEquals(lfProposal!.observed_reads, ["frame", "live"]);
+  assertEquals(lfProposal!.exists, "otter:live-follow"); // loop closed on the real corpus
 });
