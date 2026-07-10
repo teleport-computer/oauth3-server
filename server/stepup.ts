@@ -103,6 +103,11 @@ export function approveChallenge(id: string, approver: string, approverIsOwner: 
   // Check if the approver's session matches the app attribution
   // This is enforced at the handler level (subjectOf checks); here we just record
   chal.status = "approved";
+  // Clear the token's first-use flag so the app's NEXT read scores "approve" instead of
+  // re-challenging. Without this, an approved challenge never lets a read through — the token
+  // is stuck challenging forever (score() only checks first-use). chal.token is already the
+  // 16-char prefix; recordTokenUse keys on the same slice.
+  recordTokenUse(chal.token, chal.plugin);
   audit("stepup.approved", {
     challengeId: id,
     plugin: chal.plugin,
