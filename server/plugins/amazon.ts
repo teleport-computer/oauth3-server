@@ -52,11 +52,24 @@ export interface CartLine {
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+// Decode a numeric code point, refusing out-of-range / lone-surrogate values so a
+// malformed numeric entity can't throw or emit a broken half-string (it contributes
+// nothing instead). Used by decodeEntities for the &#NN; / &#xNN; forms Amazon emits.
+function fromCodePointSafe(n: number): string {
+  if (!Number.isInteger(n) || n < 1 || n > 0x10ffff || (n >= 0xd800 && n <= 0xdfff)) {
+    return "";
+  }
+  return String.fromCodePoint(n);
+}
+
 function decodeEntities(s: string): string {
+  // Numeric forms (&#039; / &#x27;) first, BEFORE &amp; — so a literal sequence like
+  // `&amp;#039;` (the visible text "&#039;") is not re-decoded once &amp; opens it up.
   return s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => fromCodePointSafe(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => fromCodePointSafe(Number(d)))
     .replace(/&amp;/g, "&")
     .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
     .replace(/&apos;/g, "'")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
@@ -97,6 +110,17 @@ function inputValue(html: string, cls: string): string | undefined {
   return m ? attr(m[0], "value") : undefined;
 }
 
+// Normalize a raw cart-line title into a clean product name: decode any entities
+// classText left encoded, drop the trailing "Opens in a new tab" Amazon appends to the
+// product link's aria-label / screen-reader span, collapse the newline/tab whitespace
+// the HTML leaves behind, and trim. No truncation — length is the consumer's call.
+// cart-share v2 used to scrub this client-side; it belongs at the source so every
+// reader (items endpoint, fetchItem, screenshots) gets the same clean name.
+function cleanTitle(raw: string): string {
+  const stripped = decodeEntities(raw).replace(/\s*Opens in a new tab\s*$/i, "");
+  return stripped.replace(/\s+/g, " ").trim();
+}
+
 // Pure DOM parser — turns the authenticated /gp/cart/view.html HTML into cart lines.
 // Each product row is an element carrying the standalone `sc-list-item` class AND a
 // `data-asin` (rows without data-asin — headers, save-for-later spacers — are skipped).
@@ -131,7 +155,7 @@ export function parseCart(html: string): CartLine[] {
       attr(positions[i].tag, "data-quantity") ||
       "1";
     const qty = Number(qtyStr) || 1;
-    lines.push({ asin, title: title.trim(), price: price.trim(), qty });
+    lines.push({ asin, title: cleanTitle(title), price: price.trim(), qty });
   }
   return lines;
 }
