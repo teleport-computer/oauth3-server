@@ -1,15 +1,23 @@
-// Reddit plugin — delegated read of your saved posts/comments via Reddit's web
-// .json API (cookie-authenticated, no OAuth app). Verified live 2026-06-24 against
-// a real account:
-//   /api/me.json                  -> { data: { name } }
+// Reddit plugin — delegated read of your saved posts/comments AND your account karma
+// via Reddit's web .json API (cookie-authenticated, no OAuth app). Verified live
+// 2026-06-24 against a real account:
+//   /api/me.json                  -> { data: { name, comment_karma, link_karma, total_karma } }
 //   /user/<name>/saved.json       -> { data: { children: [{ kind: t3|t1, data }] } }
 //   /api/info.json?id=<fullname>  -> that item's full data (selftext / url / body)
 // Reddit keys on a browser-like User-Agent; the whole .reddit.com jar is synced.
-// (v1 lists the first page, limit=100; pagination via `after` is a TODO.)
+// The account read (/api/me.json) is the surface behind the `reddit:karma` scope
+// ingredient — identity (username) + karma breakdown. (v1 lists the first page,
+// limit=100; pagination via `after` is a TODO.)
 
-import { cookieHeader, Jar, Plugin, PluginItem } from "./types.ts";
+import { cookieHeader, Jar, Plugin, PluginAccount, PluginItem } from "./types.ts";
 
-const BASE = "https://www.reddit.com";
+// Live Reddit web API base. Override via REDDIT_BASE (e2e/mock) through
+// configureReddit(); never read Deno.env at module top level (the isolated container
+// runs --deny-env — env arrives via the handler's ctx.env, same pattern as otter).
+let BASE = "https://www.reddit.com";
+export function configureReddit(env: Record<string, string>): void {
+  if (env.REDDIT_BASE) BASE = env.REDDIT_BASE.replace(/\/$/, "");
+}
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 function headers(jar: Jar): Record<string, string> {
@@ -23,16 +31,24 @@ async function getJSON(path: string, jar: Jar): Promise<any> {
   return r.json();
 }
 
-async function username(jar: Jar): Promise<string> {
+// /api/me.json → the logged-in account's data (name + karma). The single call behind
+// both username resolution (for saved-posts) and the account/karma read.
+async function me(jar: Jar): Promise<any> {
   const j = await getJSON("/api/me.json", jar);
-  const name = j?.data?.name;
+  const d = j?.data;
+  if (!d) throw new Error("could not resolve reddit account from /api/me.json");
+  return d;
+}
+
+async function username(jar: Jar): Promise<string> {
+  const name = (await me(jar)).name;
   if (!name) throw new Error("could not resolve reddit username from /api/me.json");
-  return name;
+  return String(name);
 }
 
 export const redditPlugin: Plugin = {
   id: "reddit",
-  label: "Reddit saved",
+  label: "Reddit (saved + karma)",
   cookieDomains: [".reddit.com"],
   renderUrl: "https://www.reddit.com",
 
@@ -63,6 +79,28 @@ export const redditPlugin: Plugin = {
     return {
       id, kind: c.kind, title: d.title, subreddit: d.subreddit, author: d.author,
       permalink: d.permalink, url: d.url, score: d.score, body: d.selftext || d.body || "",
+    };
+  },
+
+  // Account-level read (the surface behind the `reddit:karma` scope ingredient):
+  // the logged-in account's identity + karma breakdown. `total_karma` is taken from
+  // Reddit when present, else derived as comment + link (the web .json shape omits it
+  // for some accounts). Gated at the handler read chokepoint (readKind "account").
+  async account(jar: Jar): Promise<PluginAccount> {
+    const d = await me(jar);
+    const name = d.name ? String(d.name) : "";
+    if (!name) throw new Error("could not resolve reddit account from /api/me.json");
+    const comment = Number(d.comment_karma) || 0;
+    const link = Number(d.link_karma) || 0;
+    const total = Number(d.total_karma) || comment + link;
+    return {
+      id: name,
+      label: `u/${name}`,
+      fields: [
+        { key: "total_karma", label: "Total karma", value: total },
+        { key: "comment_karma", label: "Comment karma", value: comment },
+        { key: "link_karma", label: "Link karma", value: link },
+      ],
     };
   },
 };

@@ -4,29 +4,46 @@
 // toggle. Passkey / TinyCloud slot in here later; the session layer is the same.
 // Relative API URLs so it works behind the daemon's /<project>/ path prefix.
 
+import { DESIGN_CSS } from "./design.ts";
+
 const esc = (s: string) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
 
 export function loginPage(returnUrl: string): string {
   return `<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Sign in — OAuth3</title>
-<style>
- body{font-family:system-ui;max-width:26rem;margin:4rem auto;padding:0 1rem;color:#111}
- .card{border:1px solid #e5e5e5;border-radius:12px;padding:24px}
- h2{margin:0 0 4px} .sub{color:#666;font-size:13px;margin-bottom:16px}
- input{width:100%;padding:9px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;margin-top:10px;font-family:ui-monospace,monospace}
- button{width:100%;padding:11px;border:0;border-radius:8px;background:#3b82f6;color:#fff;font-size:14px;cursor:pointer;margin-top:12px}
- #msg{margin-top:12px;font-size:13px;text-align:center}
+<style>${DESIGN_CSS}
+ /* login page local — everything else derives from the tokens above */
+ body{max-width:26rem;margin:4rem auto;padding:0 1rem}
+ .card{padding:24px}
+ .brand{display:flex;align-items:center;gap:9px;margin:0 0 8px}
+ .brand .mark{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;background:var(--ink1);color:#fff;font:800 20px/1 var(--sans)}
+ .brand .word{font:800 18px var(--sans);letter-spacing:-.01em;color:var(--text)}
+ .brand .word b{color:var(--i2-text);font-weight:inherit}
+ h2{font:800 26px/0.96 var(--cond);text-transform:uppercase;letter-spacing:.02em;margin:0 0 6px;color:var(--ink1);text-shadow:var(--off) var(--off) 0 var(--ink2)}
+ .sub{color:var(--faint);font-size:13px;line-height:1.5;margin-bottom:14px}
+ /* one solid-ink button per view: "Continue" is primary; the rest are ghost/quiet/brand */
+ .card .btn{display:flex;width:100%;box-sizing:border-box;justify-content:center;text-align:center}
+ .card .btn+.btn,.card .btn+.provider,.card .provider+.btn,.card .provider+.provider{margin-top:10px}
+ /* provider sign-in buttons keep their brand color; square corners + .btn typography */
+ .provider{display:block;width:100%;box-sizing:border-box;text-align:center;padding:12px 22px;border:0;color:#fff;cursor:pointer;box-shadow:3px 3px 0 var(--rule);font:800 14px var(--cond);text-transform:uppercase;letter-spacing:.12em}
+ input{width:100%;padding:9px;border:1px solid var(--rule);background:var(--card);color:var(--text);box-sizing:border-box;margin-top:10px;font:14px var(--mono)}
+ #msg{margin-top:12px;font-size:13px;text-align:center;font-family:var(--mono)}
+ #ownerbox{margin-top:10px}
 </style></head><body>
 <div class=card id=card>
-  <h2>Sign in to your room</h2>
-  <div class=sub>This browser holds a key that is your identity — no password, no passkey, and the key never leaves your device. Apps you approve get scoped tokens, never your cookies.</div>
-  <button id=go>Continue in this browser</button>
-  <div id=adv style="margin-top:14px;font-size:13px">
-    <a href="#" id=tog style="color:#666">Sign in as owner instead</a>
-    <div id=ownerbox style="display:none">
-      <input id=secret type=password placeholder="owner secret">
-      <button id=ownergo>Sign in as owner</button>
-    </div>
+  <div class=brand><span class=mark>∀</span><span class=word>OAuth<b>3</b></span></div>
+  <h2>Sign in to your pod</h2>
+  <div class=sub>Your pod runs in a secure enclave (TEE) that holds your site logins sealed — so apps you approve get scoped, revocable access, never your raw cookies. Choose how to sign in:</div>
+  <button id=go class=btn>Continue in this browser</button>
+  <button id=pk class="btn ghost">Sign in with a passkey</button>
+  <button id=ext class=provider style="background:#0ea5e9;display:none">Sign in with my OAuth3 extension</button>
+  <button id=gh class=provider style="background:#24292f;display:none">Sign in with GitHub</button>
+  <button id=gg class=provider style="background:#1a73e8;display:none">Sign in with Google</button>
+  <button id=ok class=provider style="background:#7c3aed;display:none">Sign in with OpenKey</button>
+  <!-- owner is an admin-only escape hatch, hidden from normal users (reveal with ?owner) -->
+  <div id=ownerbox style="display:none">
+    <input id=secret type=password placeholder="owner secret">
+    <button id=ownergo class="btn quiet">Sign in as owner</button>
   </div>
   <div id=msg></div>
 </div>
@@ -34,7 +51,7 @@ export function loginPage(returnUrl: string): string {
  const RET = ${JSON.stringify(returnUrl)};
  const SK = 'oauth3_session', DK = 'oauth3_didkey';
  const $=(id)=>document.getElementById(id);
- const msg=(t,ok)=>{const m=$('msg');m.textContent=t;m.style.color=ok?'#16a34a':'#b91c1c'};
+ const msg=(t,ok)=>{const m=$('msg');m.textContent=t;m.style.color=ok?'var(--i1-text)':'var(--i2-text)'};
  const B58="123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
  function b58e(b){const d=[0];for(const x of b){let c=x;for(let j=0;j<d.length;j++){c+=d[j]<<8;d[j]=c%58;c=(c/58)|0;}while(c){d.push(c%58);c=(c/58)|0;}}let s="";for(const x of b){if(x===0)s+="1";else break;}for(let k=d.length-1;k>=0;k--)s+=B58[d[k]];return s;}
  const b64=u=>btoa(String.fromCharCode(...u));
@@ -59,10 +76,62 @@ export function loginPage(returnUrl: string): string {
    if(r.ok&&d.session){ localStorage.setItem(SK,d.session); msg('Signed in as '+d.subject+'.',true); if(RET) setTimeout(()=>location.href=RET,600); else check(); }
    else msg(d.error||'sign-in failed',false);
  }
- async function check(){ const t=localStorage.getItem(SK); if(!t) return; const d=await (await fetch('api/me',{headers:{Authorization:'Bearer '+t}})).json().catch(()=>({})); if(d.signedIn){ $('card').innerHTML='<h2>Signed in</h2><div class=sub>as '+d.subject+'. You can close this tab'+(RET?', or <a href="'+RET+'">continue</a>.':'.')+'</div>'; if(RET) setTimeout(()=>location.href=RET,800);} }
+ async function check(){
+   const t=localStorage.getItem(SK); if(!t) return;
+   const d=await (await fetch('api/me',{headers:{Authorization:'Bearer '+t}})).json().catch(()=>({}));
+   if(!d.signedIn) return;
+   if(RET){ msg('Signed in as '+d.subject+' — continuing…',true); setTimeout(()=>location.href=RET,800); return; }
+   // Already signed in, but STAY here so you can switch identity (e.g. sign in with your
+   // extension to sync) or jump to the dashboard — don't hide the method buttons.
+   msg('Signed in as '+d.subject+'. Switch with a method below, or open the dashboard.',true);
+   if(!$('dashlink')){ const a=document.createElement('a'); a.id='dashlink'; a.href='dashboard'; a.textContent='Open dashboard →'; a.style.cssText='display:block;text-align:center;margin-top:12px;color:var(--i1-text);font-weight:600'; $('msg').after(a); }
+ }
+ // Passkey sign-in — works on a fresh device with no prior key (the passkey was
+ // enrolled earlier against your subject, from the dashboard).
+ async function passkeyLogin(){
+   const o=await (await fetch('api/passkey/login/options',{method:'POST'})).json();
+   if(o.error) throw new Error(o.error);
+   const allow=(o.allowCredentials||[]).map(id=>({type:'public-key',id:b64uDec(id)}));
+   const cred=await navigator.credentials.get({publicKey:{challenge:b64uDec(o.challenge),rpId:o.rpId,allowCredentials:allow,userVerification:'preferred',timeout:60000}});
+   const r=cred.response;
+   const d=await (await fetch('api/passkey/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:cred.id,clientDataJSON:b64(new Uint8Array(r.clientDataJSON)),authenticatorData:b64(new Uint8Array(r.authenticatorData)),signature:b64(new Uint8Array(r.signature))})})).json();
+   if(d.ok&&d.session){ localStorage.setItem(SK,d.session); msg('Signed in as '+d.subject+'.',true); if(RET) setTimeout(()=>location.href=RET,600); else check(); }
+   else msg(d.error||'passkey sign-in failed',false);
+ }
  check();
  $('go').addEventListener('click',()=>didLogin().catch(e=>msg('this browser lacks Ed25519 WebCrypto: '+e.message,false)));
- $('tog').addEventListener('click',(e)=>{e.preventDefault(); $('ownerbox').style.display='block'; $('secret').focus();});
+ $('pk').addEventListener('click',()=>passkeyLogin().catch(e=>msg('passkey: '+(e.message||e),false)));
+ // Sign in AS your browser extension's wallet identity (same subject) — keeps the web
+ // dashboard in sync with the extension. Only shown when the oauth3 wallet is present.
+ async function extSignIn(){
+   const node=location.origin+location.pathname.replace(/\\/login.*$/,'');
+   const r=await window.oauth3.signIn({node});
+   if(!r||!r.session) throw new Error('extension returned no session');
+   localStorage.setItem(SK,r.session); msg('Signed in as '+r.subject+' (via extension).',true);
+   if(RET) setTimeout(()=>location.href=RET,600); else check();
+ }
+ if(window.oauth3&&window.oauth3.signIn){ $('ext').style.display='block'; $('ext').addEventListener('click',()=>extSignIn().catch(e=>msg('extension: '+(e.message||e),false))); }
+ // GitHub button — shown only when the instance has GitHub creds configured.
+ // OpenKey: load the SDK from a CDN (this page is vanilla, not bundled), connect, sign a
+ // SIWE message, POST it. Mirrors listen-fe's flow.
+ async function openkeyLogin(){
+   const mod=await import('https://esm.sh/@openkey/sdk@0.8');
+   const OpenKey=mod.default||mod.OpenKey;
+   const ok=new OpenKey({host:'https://openkey.so',appName:'OAuth3'});
+   const auth=await ok.connect();
+   const n=await (await fetch('api/login/openkey/nonce')).json();
+   const message=n.domain+' wants you to sign in with your Ethereum account:\\n'+auth.address+'\\n\\nSign in to OAuth3.\\n\\nURI: '+n.uri+'\\nVersion: 1\\nChain ID: 1\\nNonce: '+n.nonce+'\\nIssued At: '+new Date().toISOString();
+   const sg=await ok.signMessage({message,keyId:auth.keyId});
+   const d=await (await fetch('api/login/openkey',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,signature:sg.signature||sg})})).json();
+   if(d.ok&&d.session){ localStorage.setItem(SK,d.session); msg('Signed in as '+d.subject+'.',true); if(RET) setTimeout(()=>location.href=RET,600); else check(); }
+   else msg(d.error||'openkey sign-in failed',false);
+ }
+ fetch('api/login/providers').then(r=>r.json()).then(p=>{
+   if(p&&p.github){ $('gh').style.display='block'; $('gh').addEventListener('click',async()=>{ try{ const r=await(await fetch('api/login/github')).json(); if(r.url) location.href=r.url; else msg(r.error||'github not configured',false); }catch(e){ msg('github: '+(e.message||e),false); } }); }
+   if(p&&p.google){ $('gg').style.display='block'; $('gg').addEventListener('click',async()=>{ try{ const r=await(await fetch('api/login/google')).json(); if(r.url) location.href=r.url; else msg(r.error||'google not configured',false); }catch(e){ msg('google: '+(e.message||e),false); } }); }
+   if(p&&p.openkey){ $('ok').style.display='block'; $('ok').addEventListener('click',()=>openkeyLogin().catch(e=>msg('openkey: '+(e.message||e),false))); }
+ }).catch(()=>{});
+ if(new URLSearchParams(location.search).has('owner')) $('ownerbox').style.display='block';
  $('ownergo').addEventListener('click',()=>login({owner_secret:$('secret').value}));
 </script></body></html>`;
 }
