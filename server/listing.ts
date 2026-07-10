@@ -32,9 +32,17 @@ export type GateDecision = { decision: "allow" } | { decision: "devmode"; reason
 export const STATIC_LISTING: Listing[] = [
   {
     appId: "demo-app",
-    allowedPlugins: ["otter", "youtube", "reddit", "nytimes"],
+    allowedPlugins: ["otter", "youtube", "reddit", "nytimes", "amazon"],
     maxScope: "read",
     statement: "Demo app for the oauth3-server instance. Reads items from supported plugins.",
+    discharge: 1,
+  },
+  {
+    appId: "cart-share",
+    allowedPlugins: ["amazon"],
+    maxScope: "read",
+    statement:
+      "Lets a friend read your Amazon cart to suggest organic substitutions under a scoped, substitute-only capability — reads cart line items only, never checkout, address, payment, or order history.",
     discharge: 1,
   },
 ];
