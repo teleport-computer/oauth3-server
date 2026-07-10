@@ -5,12 +5,13 @@
 // plus an in-process handler test mirroring tokens_test.ts (dataDir:"" = in-memory).
 
 import { assert, assertEquals } from "jsr:@std/assert";
-import { pluginCapabilities, pluginCapability, scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
+import { appDeclarations, pluginCapabilities, pluginCapability, scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
 import { mint } from "./tokens.ts";
 import { auditLog } from "./audit.ts";
 import { recordTokenUse } from "./stepup.ts";
 import { proposeIngredients } from "./promoter.ts";
 import { approvePage } from "./approve-page.ts";
+import { scopesPage } from "./scopes-page.ts";
 import type { ConnectReq } from "./connect.ts";
 import handler from "./handler.ts";
 
@@ -37,6 +38,31 @@ Deno.test("scopeReads: otter:live-follow confines to live+frame", () => {
 Deno.test("scopeReads: union + non-ingredient caps ignored", () => {
   const r = scopeReads(["otter:live-follow", "jar"])!;
   assertEquals([...r].sort(), ["frame", "live"]);
+});
+
+// --- #88: the two novel consumed scopes seeded by the composable utilities are enforced at
+// real read chokepoints (so feedling/calendar-share's consumed claim is provably confined,
+// not hollow). youtube:history -> /feed (watch history); calendar:free-busy -> /items (events).
+Deno.test("scopeReads: youtube:history confines to feed", () => {
+  const r = scopeReads(["youtube:history"])!;
+  assert(r !== null);
+  assert(r.has("feed"), "feed is in scope -> gate passes");
+  assert(!r.has("items"), "items is out of scope -> gate denies");
+  assert(!r.has("screenshot"), "screenshot out of scope -> gate denies");
+});
+
+Deno.test("scopeReads: calendar:free-busy confines to items", () => {
+  const r = scopeReads(["calendar:free-busy"])!;
+  assert(r !== null);
+  assert(r.has("items"), "items is in scope -> gate passes");
+  assert(!r.has("screenshot"), "screenshot out of scope -> gate denies");
+});
+
+Deno.test("scopeIngredient: youtube:history + calendar:free-busy are in the enforced ledger", () => {
+  assertEquals(scopeIngredient("youtube:history")!.plugin, "youtube");
+  assertEquals([...scopeIngredient("youtube:history")!.reads], ["feed"]);
+  assertEquals(scopeIngredient("calendar:free-busy")!.plugin, "google-calendar");
+  assertEquals([...scopeIngredient("calendar:free-busy")!.reads], ["items"]);
 });
 
 Deno.test("scopeLabel: surfaces the human dial only for ingredients", () => {
@@ -160,6 +186,58 @@ Deno.test("handler GET /api/scopes — ledger also surfaces the plugin statement
   const ot = body.plugins.find((p: { plugin: string }) => p.plugin === "otter");
   assert(ot, "ledger lists the otter capability statement");
   assert((ot.statement as string).includes("otter.ai"));
+});
+
+// --- #88: the app → {consumes, offers} composition graph. Each consumed id resolves to its
+// enforced ingredient record (no drift); offers are app-declared products. The four seeded
+// utilities cover the issue's seed list, and >=3 consume a real enforced scope (acceptance).
+Deno.test("appDeclarations: every consumed id resolves to an enforced ingredient", () => {
+  const apps = appDeclarations();
+  assertEquals(apps.map((a) => a.id).sort(), ["calendar-share", "feedling", "otterpilot", "reddit-karma"]);
+  for (const a of apps) {
+    for (const c of a.consumedScopes) {
+      assert(c.enforced, `${a.id} consumes ${c.id} which must be enforced (not hollow)`);
+      assertEquals(typeof c.label, "string");
+      assertEquals(Array.isArray(c.reads), true);
+    }
+  }
+  // Acceptance bullet: at least 3 apps show a real (enforced) consumed scope.
+  const realConsumers = apps.filter((a) => a.consumedScopes.some((c) => c.enforced)).length;
+  assert(realConsumers >= 3, `>=3 apps consume a real enforced scope (got ${realConsumers})`);
+});
+
+Deno.test("appDeclarations: feedling consumes youtube:history and offers feedling:digest", () => {
+  const feedling = appDeclarations().find((a) => a.id === "feedling")!;
+  assertEquals(feedling.consumedScopes.map((c) => c.id), ["youtube:history"]);
+  assertEquals(feedling.consumedScopes[0].plugin, "youtube");
+  assertEquals(feedling.offers.map((o) => o.id), ["feedling:digest"]);
+  // otterpilot reuses the existing enforced otter:live-follow and offers a recap.
+  const otterpilot = appDeclarations().find((a) => a.id === "otterpilot")!;
+  assertEquals(otterpilot.consumedScopes.map((c) => c.id), ["otter:live-follow"]);
+  assertEquals(otterpilot.offers.map((o) => o.id), ["otterpilot:recap"]);
+});
+
+Deno.test("handler GET /api/scopes — surfaces the apps composition graph", async () => {
+  const ctx = { env: {}, dataDir: "" };
+  const res = await handler(new Request("http://localhost/api/scopes"), ctx);
+  assertEquals(res.status, 200);
+  const body = await res.json();
+  const feedling = (body.apps as { id: string }[]).find((a) => a.id === "feedling");
+  assert(feedling, "ledger lists the feedling app declaration");
+});
+
+Deno.test("handler GET /scopes — renders the composition panel from the ledger", async () => {
+  const ctx = { env: {}, dataDir: "" };
+  const res = await handler(new Request("http://localhost/scopes"), ctx);
+  assertEquals(res.status, 200);
+  const html = await res.text();
+  // The panel renders each seeded app + its enforced consumed label (no drift from the ledger)
+  // and the offered scope, so a reviewer can read the pod as composable utilities.
+  for (const id of ["feedling", "otterpilot", "reddit-karma", "calendar-share"]) {
+    assert(html.includes(id), `panel renders the ${id} app`);
+  }
+  assert(html.includes(scopeIngredient("youtube:history")!.label), "panel renders feedling's enforced consumed label");
+  assert(html.includes("feedling:digest"), "panel renders feedling's offered scope");
 });
 
 // --- #87 item 2: /live, /frame, and /feed are now gated read chokepoints. Before this, the
