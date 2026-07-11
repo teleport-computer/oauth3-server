@@ -18,6 +18,7 @@ import { pluginCapabilities, scopeIngredients } from "../scopes.ts";
 //   line 1 — &amp; entity decoding in the title, price via a-offscreen
 //   line 2 — price via data-price fallback, qty via data-quantity fallback
 const CART_HTML = `
+<a id="nav-assist-skip-to-your-items-saved" href="#sc-saved-cart-caption">Skip to saved items</a>
 <form name="activeCartViewForm" method="post" action="/gp/cart/ajax/update.html">
   <div class="sc-list-item sc-list-item-border-less sc-java-remote-filter"
        data-asin="B08N5WRWNW" data-price="13.99" data-quantity="2">
@@ -43,19 +44,32 @@ const CART_HTML = `
       <span class="sc-product-title">Pure Maple Syrup, Grade A</span>
     </a>
   </div>
-  <div class="sc-list-item sc-save-for-later-divider">
-    <span>Save for Later</span>
+</form>
+<li id="sc-saved-cart-caption" class="a-tab-heading"><span>Saved for later</span></li>
+<div id="sc-saved-cart-container" class="a-section">
+  <div id="sc-saved-cart-items">
+    <div class="a-row sc-list-item sc-java-remote-feature" data-asin="B0SAVED4LT" data-price="99.00" data-quantity="1">
+      <a class="sc-product-link" href="/dp/B0SAVED4LT">
+        <span class="sc-product-title">Saved-For-Later Item (NOT in cart)</span>
+      </a>
+    </div>
   </div>
-</form>`;
+</div>`;
 
 // --- pure parser tests (no jar, no network) ---
 
 Deno.test("amazon cart: parseCart extracts line items with title/price/qty", () => {
   const lines = parseCart(CART_HTML);
-  assertEquals(lines.length, 3); // the save-for-later divider has no data-asin → skipped
+  assertEquals(lines.length, 3); // 3 active lines; divider + saved-for-later item below it excluded
   assertEquals(lines[0], { asin: "B08N5WRWNW", title: "Organic Almond Milk, Unsweetened", price: "$13.99", qty: 2 });
   assertEquals(lines[1], { asin: "B07VGRJDFY", title: "Steel Cut Oats & Honey Granola", price: "$5.49", qty: 1 });
   assertEquals(lines[2], { asin: "B09MAPLE01", title: "Pure Maple Syrup, Grade A", price: "21.00", qty: 3 });
+});
+
+Deno.test("amazon cart: parseCart excludes the Saved-for-later section", () => {
+  // Saved-for-later rows are also sc-list-item[data-asin] but live below the divider — not cart.
+  const lines = parseCart(CART_HTML);
+  assertEquals(lines.some((l) => l.asin === "B0SAVED4LT"), false);
 });
 
 Deno.test("amazon cart: parseCart skips sc-list-item rows without data-asin", () => {
