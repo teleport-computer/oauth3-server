@@ -32,7 +32,11 @@ export interface SubstituteResult {
   added: { asin: string; title: string; price: string };
   before: unknown[]; // CartLine[] (kept loose to avoid a cycle into amazon.ts)
   after: unknown[];
-  path: string; // which mutation path was used ("server-replay"; "browser-path" when forced)
+  path: string; // which mutation path was used ("browser-path" primary; "server-replay" demoted/removed)
+  // #103: the reified cart-write ops (cart.add + cart.remove) captured at the network layer
+  // by /capture-trace over the browser-path actuation — the ground-truth evidence an
+  // unofficial cart API is reified from (RFC 0001). Present on the browser path.
+  ops?: unknown[];
 }
 // Account-level data — identity + named stats for the logged-in account (e.g. Reddit
 // username + karma breakdown). The narrow renderable surface behind a scope ingredient

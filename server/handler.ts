@@ -961,6 +961,14 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!amazonPlugin.substitute) return json({ error: "plugin does not expose cart writes" }, 501);
     try {
       const result = await amazonPlugin.substitute(jar, body || {});
+      // #103: audit the reified trajectory — WHICH mutation path ran + how many cart-write ops
+      // the network layer captured (cart.add + cart.remove). The reified `ops` ARE the ground
+      // truth and ride the response body; this audit line is the durable record for review.
+      await audit("amazon.cart.substitute.ok", {
+        subject: subj, by, path: result.path,
+        ops: Array.isArray(result.ops) ? result.ops.length : 0,
+        removed: result.removed?.asin, added: result.added?.asin,
+      });
       return json({ ok: true, plugin: "amazon", ...result });
     } catch (e) {
       const err = e as Error & { code?: string };

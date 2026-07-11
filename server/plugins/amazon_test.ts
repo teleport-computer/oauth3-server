@@ -9,6 +9,7 @@
 import { assert, assertEquals, assertRejects, assertThrows } from "jsr:@std/assert";
 import {
   amazonPlugin,
+  browserSubstitute,
   cartQtyFieldName,
   categorize,
   configureAmazon,
@@ -16,10 +17,12 @@ import {
   isCaptcha,
   MAX_SUBSTITUTE_QTY,
   normalizeSubstitute,
+  parseAsinOffer,
   parseCart,
   parseCartUpdateForm,
   parsePrice,
   priceBandOk,
+  reifyAmazonTrace,
   sameCategory,
   SubstituteDeniedError,
 } from "./amazon.ts";
@@ -569,4 +572,281 @@ Deno.test("amazon substitute handler: no checkout endpoint exists for the cap (d
   const tok = await mint("amazon", "friend", "cart-share-friend", ["amazon:cart-substitute"]);
   const res = await postSub(tok.token, { op: "checkout", asin: "B07VGRJDFY", qty: 1 });
   assertEquals(res.status, 403);
+});
+
+// ============================================================================
+// #103 — amazon:cart-substitute via the in-TEE BROWSER PATH + reification (RFC 0001).
+// The raw server-side CSRF-scrape POST bot-walls on TLS/behavioral fingerprint even though
+// the CSRF token is readable, so the write now drives the Browser SPI (inject jar → add →
+// remove → /capture-trace) and reifies the captured cart-write ops (cart.add + cart.remove) —
+// the analog of twitter's reifyTrace over the TWEET_OPS map (server/twitter-actions.ts).
+// reifyAmazonTrace + parseAsinOffer are PURE functions exercised here against captured
+// fixtures; browserSubstitute is driven end-to-end against a LOCAL Browser-SPI mock (the
+// verifiable substitute for the operator-run live-jar proof in acceptance #1).
+// ============================================================================
+
+// A captured amazon network_log over a real substitute (B08N5WRWNW almond milk → B07VGRJDFY
+// oat milk): the cart-view XHRs the reifier must IGNORE, the add.html POST (cart.add), and
+// the cart-update AJAX with quantity.1=0 (cart.remove). Carries the real anti-csrftoken-a2z
+// in the request BODY (`csrf-token`) AND the header — the reifier surfaces the body one
+// (captured at the network layer, never scraped-and-replayed server-side). snake_case fields
+// = the twitter-bridge schema.
+const TRACE_ADD = {
+  method: "POST",
+  url: "https://www.amazon.com/gp/aws/cart/add.html?ref=odp_punches",
+  request_headers: { "content-type": "application/x-www-form-urlencoded", "anti-csrftoken-a2z": "h:HEADERtOK" },
+  post_data: "ASIN.1=B07VGRJDFY&Quantity.1=1&csrf-token=BODYtOKadd",
+  status: 200,
+  response_body: '{"cartCount":1}',
+};
+const TRACE_REMOVE = {
+  method: "POST",
+  url: "https://www.amazon.com/gp/cart/ajax/update.html?encoding=UTF8",
+  request_headers: { "anti-csrftoken-a2z": "h:HEADERtOK" },
+  post_data: "quantity.1=0&csrf-token=BODYtOKrm",
+  status: 200,
+  response_body: '{"cartAction":"delete"}',
+};
+const TRACE_UPDATE = {
+  method: "POST",
+  url: "https://www.amazon.com/gp/cart/ajax/update.html",
+  request_headers: {},
+  post_data: "quantity.2=2&csrf-token=BODYtOKupd",
+  status: 200,
+  response_body: '{"cartCount":2}',
+};
+const TRACE_NOISE = [
+  { method: "GET", url: "https://www.amazon.com/gp/cart/view.html", request_headers: {}, post_data: "", status: 200, response_body: "<html>cart</html>" },
+  { method: "GET", url: "https://m.media-amazon.com/images/I/41x.jpg", request_headers: {}, post_data: "", status: 200, response_body: "" },
+];
+const CAPTURED_LOG = [...TRACE_NOISE, TRACE_ADD, TRACE_REMOVE, TRACE_UPDATE];
+
+// --- reifyAmazonTrace: the pure reifier over a captured fixture (mirror twitter reify) ---
+
+Deno.test("amazon reify: reduces a captured trace to cart.add + cart.remove + cart.update", () => {
+  const ops = reifyAmazonTrace(CAPTURED_LOG) as Record<string, unknown>[];
+  assertEquals(ops.length, 3); // the two cart-view / image noise entries are dropped
+  assertEquals(ops[0].op, "cart.add");
+  assertEquals(ops[0].method, "POST");
+  assertEquals(ops[0].url, "https://www.amazon.com/gp/aws/cart/add.html"); // query stripped
+  assertEquals(ops[0].asin, "B07VGRJDFY");
+  assertEquals(ops[0].qty, "1");
+  // CSRF captured at the network layer — body field wins over the anti-csrftoken-a2z header.
+  assertEquals(ops[0].csrf_token, "BODYtOKadd");
+  assertEquals(ops[0].status, 200);
+
+  assertEquals(ops[1].op, "cart.remove"); // quantity.1=0 marks a delete
+  assertEquals(ops[1].csrf_token, "BODYtOKrm");
+
+  assertEquals(ops[2].op, "cart.update"); // quantity.2=2 (non-zero) is an update, not a remove
+});
+
+Deno.test("amazon reify: action filter isolates one op kind", () => {
+  assertEquals((reifyAmazonTrace(CAPTURED_LOG, "cart.add") as unknown[]).length, 1);
+  assertEquals((reifyAmazonTrace(CAPTURED_LOG, "cart.remove") as unknown[]).length, 1);
+  assertEquals((reifyAmazonTrace(CAPTURED_LOG, "cart.update") as unknown[]).length, 1);
+});
+
+Deno.test("amazon reify: accepts the camelCase bridge schema too (requestBody/requestHeaders)", () => {
+  // server/browser.ts documents camelCase; the reifier must handle BOTH conventions.
+  const ops = reifyAmazonTrace([{
+    method: "POST",
+    url: "https://www.amazon.com/gp/aws/cart/add.html",
+    requestHeaders: { "anti-csrftoken-a2z": "HdrCamel" },
+    requestBody: "ASIN.1=B09XYZABCD&Quantity.1=3&csrf-token=BodyCamel",
+    status: 201,
+    responseBody: '{"ok":1}',
+  }]) as Record<string, unknown>[];
+  assertEquals(ops.length, 1);
+  assertEquals(ops[0].op, "cart.add");
+  assertEquals(ops[0].asin, "B09XYZABCD");
+  assertEquals(ops[0].qty, "3");
+  assertEquals(ops[0].csrf_token, "BodyCamel");
+  assertEquals(ops[0].status, 201);
+});
+
+Deno.test("amazon reify: a CSRF carried ONLY in the anti-csrftoken-a2z header is still captured", () => {
+  const ops = reifyAmazonTrace([{
+    method: "POST",
+    url: "https://www.amazon.com/gp/aws/cart/add.html",
+    request_headers: { "anti-csrftoken-a2z": "headerOnlyTOK" },
+    post_data: "ASIN.1=B07VGRJDFY&Quantity.1=1", // no csrf-token in the body
+    status: 200,
+    response_body: "",
+  }]) as Record<string, unknown>[];
+  assertEquals(ops[0].csrf_token, "headerOnlyTOK");
+});
+
+Deno.test("amazon reify: an empty / non-cart trace reifies to [] (never throws)", () => {
+  assertEquals(reifyAmazonTrace([]), []);
+  assertEquals(
+    reifyAmazonTrace([{ method: "GET", url: "https://www.amazon.com/", request_headers: {}, post_data: "", status: 200, response_body: "" }]),
+    [],
+  );
+});
+
+// --- parseAsinOffer: pure DP-page scraper (the addAsin side of the browser-path gate) ---
+
+const DP_HTML = `
+<html><body>
+  <h1 id="productTitle">Oat Milk, Barista Blend</h1>
+  <span id="priceblock_ourprice">$4.99</span>
+</body></html>`;
+
+Deno.test("amazon substitute: parseAsinOffer scrapes the DP title + price (pure)", () => {
+  assertEquals(parseAsinOffer(DP_HTML), { title: "Oat Milk, Barista Blend", price: "$4.99" });
+  // miss → empty strings (the price-band check then fails CLOSED)
+  assertEquals(parseAsinOffer("<html></html>"), { title: "", price: "" });
+});
+
+// --- raw-fetch path DEMOTED: substitute() with no Browser SPI throws the browser-path error ---
+
+Deno.test("amazon substitute: raw server-side replay is DEMOTED — throws browser-path with no SPI", async () => {
+  configureAmazon({}); // no BROWSER_SPI_URL → the raw POST must NOT be attempted
+  assert(typeof amazonPlugin.substitute === "function", "substitute is wired");
+  await assertRejects(
+    () => amazonPlugin.substitute!({ "at-main": "x" }, { removeAsin: "B08N5WRWNW", addAsin: "B07VGRJDFY", qty: 1 }),
+    Error,
+    "BROWSER-PATH",
+  );
+});
+
+// --- browserSubstitute end-to-end against a LOCAL Browser-SPI mock (verifiable e2e) ---
+//
+// The mock stands in for the in-TEE browser: /session + /navigate + /eval ack, and
+// /capture-trace returns the BEFORE cart dom on call #1, the DP offer dom on #2, and the
+// AFTER cart dom + the captured network_log (the add + remove ops) on #3 — the deterministic
+// sequence browserSubstitute drives. 127.0.0.1 only; no live network. This is the verifiable
+// substitute for the operator-run live-jar proof (acceptance #1).
+
+const BEFORE_CART_HTML = `
+<form name="activeCartViewForm" method="post" action="/gp/cart/ajax/update.html">
+  <input type="hidden" name="csrf-token" value="MOCKcsrf">
+  <div class="sc-list-item sc-list-item-border-less" data-asin="B08N5WRWNW" data-price="13.99" data-quantity="2">
+    <a class="sc-product-link"><span class="sc-product-title">Organic Almond Milk, Unsweetened</span></a>
+    <span class="a-offscreen">$13.99</span>
+    <input class="sc-quantity-textfield" name="quantity.1" value="2">
+  </div>
+</form>`;
+const AFTER_CART_HTML = `
+<form name="activeCartViewForm" method="post" action="/gp/cart/ajax/update.html">
+  <input type="hidden" name="csrf-token" value="MOCKcsrf">
+  <div class="sc-list-item sc-list-item-border-less" data-asin="B07VGRJDFY" data-price="4.99" data-quantity="1">
+    <a class="sc-product-link"><span class="sc-product-title">Oat Milk, Barista Blend</span></a>
+    <span class="a-offscreen">$4.99</span>
+    <input class="sc-quantity-textfield" name="quantity.2" value="1">
+  </div>
+</form>`;
+
+let spiBase = "";
+let spiServer: { shutdown(): Promise<void> } | undefined;
+let spiCaptureCount = 0;
+
+function mockSpi(req: Request): Response {
+  const u = new URL(req.url);
+  if (u.pathname === "/capture-trace") {
+    spiCaptureCount++;
+    if (spiCaptureCount === 1) {
+      return new Response(
+        JSON.stringify({ dom_html: BEFORE_CART_HTML, network_log: [], url: "https://www.amazon.com/gp/cart/view.html" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    if (spiCaptureCount === 2) {
+      return new Response(
+        JSON.stringify({ dom_html: DP_HTML, network_log: [], url: "https://www.amazon.com/dp/B07VGRJDFY" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+    return new Response(
+      JSON.stringify({ dom_html: AFTER_CART_HTML, network_log: [TRACE_ADD, TRACE_REMOVE], url: "https://www.amazon.com/gp/cart/view.html" }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  }
+  // /session, /navigate, /eval all ack (the mock records the actuation calls happened).
+  return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+}
+
+Deno.test("amazon browser substitute: start SPI mock", async () => {
+  spiCaptureCount = 0;
+  // zero the settle delays — there's no real browser to wait for in the mock.
+  configureAmazon({ BROWSER_NAV_DELAY_MS: "0", BROWSER_PRE_REMOVE_DELAY_MS: "0" });
+  const ready = Promise.withResolvers<string>();
+  spiServer = Deno.serve(
+    { port: 0, hostname: "127.0.0.1", onListen: (a) => ready.resolve(`http://${a.hostname}:${a.port}`) },
+    mockSpi,
+  );
+  spiBase = await ready.promise;
+});
+
+Deno.test("amazon browser substitute: drives the SPI, reifies the add+remove ops", async () => {
+  const result = await browserSubstitute(
+    spiBase,
+    { "at-main": "x" },
+    { removeAsin: "B08N5WRWNW", addAsin: "B07VGRJDFY", qty: 1 },
+    "",
+  );
+  assertEquals(result.path, "browser-path");
+  assertEquals(result.removed.asin, "B08N5WRWNW");
+  assertEquals((result.added as { asin: string }).asin, "B07VGRJDFY");
+  assertEquals((result.added as { title: string }).title, "Oat Milk, Barista Blend");
+  // the before/after carts are the browser-captured ground truth
+  assertEquals((result.before as { asin: string }[]).map((l) => l.asin), ["B08N5WRWNW"]);
+  assertEquals((result.after as { asin: string }[]).map((l) => l.asin), ["B07VGRJDFY"]);
+  // the reified trajectory — cart.add + cart.remove — IS the ground-truth evidence
+  const ops = result.ops as Record<string, unknown>[];
+  assertEquals(ops.length, 2);
+  assertEquals(ops[0].op, "cart.add");
+  assertEquals(ops[0].asin, "B07VGRJDFY");
+  assertEquals(ops[0].csrf_token, "BODYtOKadd");
+  assertEquals(ops[1].op, "cart.remove");
+  assertEquals(ops[1].csrf_token, "BODYtOKrm");
+});
+
+Deno.test("amazon browser substitute: server-side gate denies a cross-category swap BEFORE actuation", async () => {
+  // A dedicated mock whose capture #2 (the addAsin DP page) is a $4.99 COFFEE — a different
+  // category than the almond-milk remove line (dairy) → sameCategory is false → the gate
+  // throws SubstituteDeniedError BEFORE any /eval actuation. The mock counts /eval calls to
+  // PROVE no write was attempted on denial (the price-band / category gates are the cap's
+  // enforcement; they must run before the browser touches the cart).
+  let evalCalls = 0;
+  let capCount = 0;
+  const COFFEE_DP = '<html><body><h1 id="productTitle">Whole Bean Coffee, Dark Roast</h1>' +
+    '<span id="priceblock_ourprice">$4.99</span></body></html>';
+  const denySpi = (req: Request): Response => {
+    const u = new URL(req.url);
+    if (u.pathname === "/eval") {
+      evalCalls++;
+      return new Response(JSON.stringify({ text: "actuated" }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (u.pathname === "/capture-trace") {
+      capCount++;
+      const dom = capCount === 1 ? BEFORE_CART_HTML : capCount === 2 ? COFFEE_DP : AFTER_CART_HTML;
+      return new Response(JSON.stringify({ dom_html: dom, network_log: [], url: "https://www.amazon.com/" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+  };
+  const ready = Promise.withResolvers<string>();
+  const srv = Deno.serve(
+    { port: 0, hostname: "127.0.0.1", onListen: (a) => ready.resolve(`http://${a.hostname}:${a.port}`) },
+    denySpi,
+  );
+  const base2 = await ready.promise;
+  try {
+    await assertRejects(
+      () => browserSubstitute(base2, { "at-main": "x" }, { removeAsin: "B08N5WRWNW", addAsin: "B07VGRJDFY", qty: 1 }, ""),
+      SubstituteDeniedError,
+      "different category",
+    );
+    assertEquals(evalCalls, 0, "no /eval actuation may run when the gate denies (cap enforcement is pre-actuation)");
+  } finally {
+    await srv.shutdown();
+  }
+});
+
+Deno.test("amazon browser substitute: stop SPI mock", async () => {
+  await spiServer?.shutdown();
 });
