@@ -18,6 +18,7 @@ import { pluginCapabilities, scopeIngredients } from "../scopes.ts";
 //   line 1 — &amp; entity decoding in the title, price via a-offscreen
 //   line 2 — price via data-price fallback, qty via data-quantity fallback
 const CART_HTML = `
+<a id="nav-assist-skip-to-your-items-saved" href="#sc-saved-cart-caption">Skip to saved items</a>
 <form name="activeCartViewForm" method="post" action="/gp/cart/ajax/update.html">
   <div class="sc-list-item sc-list-item-border-less sc-java-remote-filter"
        data-asin="B08N5WRWNW" data-price="13.99" data-quantity="2">
@@ -43,15 +44,17 @@ const CART_HTML = `
       <span class="sc-product-title">Pure Maple Syrup, Grade A</span>
     </a>
   </div>
-  <div class="sc-list-item sc-save-for-later-divider">
-    <span>Save for Later</span>
+</form>
+<li id="sc-saved-cart-caption" class="a-tab-heading"><span>Saved for later</span></li>
+<div id="sc-saved-cart-container" class="a-section">
+  <div id="sc-saved-cart-items">
+    <div class="a-row sc-list-item sc-java-remote-feature" data-asin="B0SAVED4LT" data-price="99.00" data-quantity="1">
+      <a class="sc-product-link" href="/dp/B0SAVED4LT">
+        <span class="sc-product-title">Saved-For-Later Item (NOT in cart)</span>
+      </a>
+    </div>
   </div>
-  <div class="sc-list-item sc-list-item-border-less" data-asin="B0SAVED4LT" data-price="99.00" data-quantity="1">
-    <a class="sc-product-link" href="/dp/B0SAVED4LT">
-      <span class="sc-product-title">Saved-For-Later Item (NOT in cart)</span>
-    </a>
-  </div>
-</form>`;
+</div>`;
 
 // --- pure parser tests (no jar, no network) ---
 
