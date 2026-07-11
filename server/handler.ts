@@ -52,7 +52,7 @@ import { browserScreenshot, browserFeed } from "./browser.ts";
 import { apiLike, apiMe, apiTimeline, apiTweet, apiUnlike, browserTrace } from "./twitter-actions.ts";
 import { appDeclarations, pluginCapabilities, scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
 import { proposeIngredients } from "./promoter.ts";
-import { approveChallenge, createChallenge, denyChallenge, getChallenge, recordTokenUse, score, wasFirstUse } from "./stepup.ts";
+import { approveChallenge, createChallenge, denyChallenge, getChallenge, initStepup, recordTokenUse, score, wasFirstUse } from "./stepup.ts";
 
 let ready = false;
 let ownerSecret = "";
@@ -67,6 +67,7 @@ async function init(env: Record<string, string>, dataDir: string) {
   await initVault(dataDir, env.SEAL_KEY || env.OAUTH3_SEAL_KEY || "");
   await initTokens(dataDir);
   await initConnect(dataDir);
+  await initStepup(dataDir);
   await initAudit(dataDir);
   await initSessions(dataDir);
   await initPasskeys(dataDir);
@@ -585,7 +586,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       const body = await req.json().catch(() => null) as any;
       const approver = subjectOf() ?? (!!ownerSecret && body?.owner_secret === ownerSecret ? "owner" : null);
       if (!approver) return json({ error: "sign in to respond" }, 401);
-      const c = action === "approve" ? approveChallenge(id, approver, isOwner(req)) : denyChallenge(id, approver, isOwner(req));
+      const c = action === "approve" ? await approveChallenge(id, approver, isOwner(req)) : denyChallenge(id, approver, isOwner(req));
       if (!c) return json({ error: "unknown or already-decided challenge" }, 404);
       return json({ ok: true, status: c.status, challengeId: c.challengeId });
     }
@@ -688,7 +689,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       const shot = await browserScreenshot(browserSpiUrl, plugin, jar, target, browserSpiSecret);
       // Record token use after successful read (marks first-use as consumed)
       if (t && !isOwner(req)) {
-        recordTokenUse(bearer, plugin.id);
+        await recordTokenUse(bearer, plugin.id);
       }
       await audit("screenshot", { plugin: plugin.id, url: target, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, url: target, ...shot });
@@ -733,7 +734,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
     try {
       const { who, items } = await browserFeed(browserSpiUrl, plugin, jar, target, browserSpiSecret);
-      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       await audit("feed", { plugin: plugin.id, count: items.length, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, who, items });
     } catch (e) {
@@ -789,7 +790,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     try {
       const data = await plugin.live(jar, Number(url.searchParams.get("after") || "0") || 0);
-      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       await audit("live", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, data });
     } catch (e) {
@@ -817,7 +818,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     catch { return json({ error: "bad frame url" }, 400); }
     try {
       const { bytes, contentType } = await plugin.fetchFrame(jar, target);
-      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       return new Response(bytes as unknown as BodyInit, { headers: { "Content-Type": contentType, "Access-Control-Allow-Origin": "*" } });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
@@ -851,18 +852,18 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       // the list (/items) is {plugin, items:[...], data:items} — `items` matches the
       // endpoint name + listItems, `data` is a back-compat alias still read by oauth3-sdk,
       // cli.ts, app-page.ts and otterscope. Prefer `items` in new code.
-      const recordUse = () => {
-        if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      const recordUse = async () => {
+        if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       };
       const by = t ? (t.app || t.subject || "token") : "owner";
       if (m[2]) {
         const data = await plugin.fetchItem(jar, decodeURIComponent(m[2]));
-        recordUse();
+        await recordUse();
         await audit("read", { plugin: plugin.id, item: m[2], by });
         return json({ plugin: plugin.id, data });
       }
       const items = await plugin.listItems(jar, listOpts);
-      recordUse();
+      await recordUse();
       await audit("read", { plugin: plugin.id, item: "list", by });
       return json({ plugin: plugin.id, items, data: items });
     } catch (e) {
@@ -889,7 +890,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     try {
       const data = await plugin.account(jar);
-      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       await audit("account", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, account: data });
     } catch (e) {
