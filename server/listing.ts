@@ -45,6 +45,27 @@ export const STATIC_LISTING: Listing[] = [
       "Lets a friend read your Amazon cart to suggest organic substitutions under a scoped, substitute-only capability — reads cart line items only, never checkout, address, payment, or order history.",
     discharge: 1,
   },
+  {
+    appId: "timeline-peek",
+    allowedPlugins: ["twitter"],
+    maxScope: "read",
+    statement: "Renders your Twitter/X timeline from a scoped read token — reads the feed only; cookies never leave the TEE.",
+    discharge: 1,
+  },
+  {
+    appId: "calendar-share",
+    allowedPlugins: ["google-calendar"],
+    maxScope: "read",
+    statement: "Lists your Google Calendar events under a scoped read token; a per-event share code carries only a write:event:<id> capability for the one event you delegate.",
+    discharge: 1,
+  },
+  {
+    appId: "reddit-karma",
+    allowedPlugins: ["reddit"],
+    maxScope: "read",
+    statement: "Shows your Reddit account karma from a scoped read token — reads account/karma only.",
+    discharge: 1,
+  },
 ];
 
 /**
