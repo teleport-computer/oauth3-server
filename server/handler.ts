@@ -44,7 +44,8 @@ import { allCredentialIds, credentialsFor, initPasskeys, passkeyChallenge, verif
 import { consumeState, enabledProviders, githubAuthUrl, githubEnv, githubExchange, googleAuthUrl, googleEnv, googleExchange, newState } from "./oidc.ts";
 import { configureOtter } from "./plugins/otter.ts";
 import { configureReddit } from "./plugins/reddit.ts";
-import { configureAmazon } from "./plugins/amazon.ts";
+import { amazonPlugin, configureAmazon } from "./plugins/amazon.ts";
+import type { SubstituteOp } from "./plugins/types.ts";
 import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.ts";
 import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot, browserFeed } from "./browser.ts";
@@ -928,6 +929,45 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       return json({ ok: true, plugin: "google-calendar", eventId, result });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  // --- amazon cart-substitute WRITE (#98): edit-on-behalf, attenuated to ONE swap. The owner
+  // may always substitute; a delegated friend may substitute ONE line only if its token carries
+  // the `amazon:cart-substitute` cap (verifyCap — exact string, like write:event:<id>). The cap
+  // grants NO reads (scopeReads(["amazon:cart-substitute"]) is an empty set, so a substitute-
+  // only token is denied at every read chokepoint — it cannot read the cart or order history).
+  // Server-side scope enforcement lives in amazonPlugin.substitute (normalize + price band +
+  // same category + qty bound) which throws SubstituteDeniedError for any shape the cap must
+  // NOT permit (arbitrary add, quantity-bomb, out-of-band/cross-category substitute, unreadable
+  // replacement price); the handler maps denied -> 403 and any other failure -> 502. There is no
+  // checkout/address/payment endpoint, so those are inherently unavailable to this cap. Every
+  // attempt is audited, authorized or not.
+  if (req.method === "POST" && path === "/api/amazon/cart/substitute") {
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const cap = "amazon:cart-substitute";
+    const t = verifyCap(bearer, "amazon", cap);
+    if (!isOwner(req) && !t) {
+      await audit("amazon.cart.substitute.denied", { reason: "unauthorized" });
+      return json({ error: `unauthorized — token must carry ${cap}` }, 401);
+    }
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const by = t ? (t.app || t.subject || "token") : "owner";
+    const body = await req.json().catch(() => null) as Partial<SubstituteOp> | null;
+    const jar = getJar(subj, "amazon");
+    if (!jar) return json({ error: "no jar synced for amazon" }, 409);
+    if (!amazonPlugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    await audit("amazon.cart.substitute", { subject: subj, by, op: body });
+    if (!amazonPlugin.substitute) return json({ error: "plugin does not expose cart writes" }, 501);
+    try {
+      const result = await amazonPlugin.substitute(jar, body || {});
+      return json({ ok: true, plugin: "amazon", ...result });
+    } catch (e) {
+      const err = e as Error & { code?: string };
+      if (err.code === "denied") {
+        return json({ error: `scope: ${err.message}`, cap }, 403);
+      }
+      return json({ error: err.message }, 502);
     }
   }
 

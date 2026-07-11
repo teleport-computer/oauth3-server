@@ -44,6 +44,19 @@ export const SCOPE_INGREDIENTS: Record<string, { plugin: string; reads: string[]
       label:
         "read-only · your Amazon cart line items (name, price, qty, ASIN) · not your address, payment, order history, or checkout",
     },
+    // #98: the cart-write cap. A cart-share friend holds this to substitute ONE cart line
+    // (remove an ASIN, add a comparable ASIN within a price band + same category). reads:[]
+    // is load-bearing — it makes scopeReads(["amazon:cart-substitute"]) an EMPTY set, so a
+    // substitute-only token is denied at EVERY read chokepoint (it cannot read the cart,
+    // order history, address, or payment); the friend view reads via a separate amazon:cart-
+    // read cap. The write itself is gated by verifyCap at the substitute route + the
+    // server-side price-band/category/qty enforcement in the plugin (SubstituteDeniedError).
+    "amazon:cart-substitute": {
+      plugin: "amazon",
+      reads: [],
+      label:
+        "write · substitute ONE cart line — remove an ASIN, add ONE comparable ASIN within a price band and the same category · CANNOT check out, add arbitrary items, change address/payment, raise quantity, or read your cart/order history",
+    },
   };
 
 // Per-plugin capability statements (RFC 0009 step 1) — the operator-authored sentence shown
@@ -85,7 +98,7 @@ export const PLUGIN_CAPABILITIES: Record<string, { plugin: string; statement: st
   amazon: {
     plugin: "amazon",
     statement:
-      "CAN read your Amazon cart line items and a logged-in screenshot of your cart. CANNOT check out, change address/payment, add items, or read order history.",
+      "CAN read your Amazon cart line items and a logged-in screenshot of your cart; a token MAY also carry an `amazon:cart-substitute` cap to swap ONE cart line for a comparable item within a price band and the same category. CANNOT check out, change address/payment, add arbitrary items, raise quantity, or read order history.",
   },
 };
 

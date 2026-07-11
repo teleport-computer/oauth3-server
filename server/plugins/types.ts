@@ -18,6 +18,22 @@ export interface PluginListOptions {
   page?: number;
   pageSize?: number;
 }
+
+// #98: the amazon cart-substitute write. removeAsin is the active-cart line to remove;
+// addAsin is the comparable replacement added at `qty`. Server-side enforced (price band +
+// same category + qty bound) before the network write.
+export interface SubstituteOp {
+  removeAsin: string;
+  addAsin: string;
+  qty: number;
+}
+export interface SubstituteResult {
+  removed: { asin: string; title: string; price: string; qty: number };
+  added: { asin: string; title: string; price: string };
+  before: unknown[]; // CartLine[] (kept loose to avoid a cycle into amazon.ts)
+  after: unknown[];
+  path: string; // which mutation path was used ("server-replay"; "browser-path" when forced)
+}
 // Account-level data — identity + named stats for the logged-in account (e.g. Reddit
 // username + karma breakdown). The narrow renderable surface behind a scope ingredient
 // like `reddit:karma`; returned by GET /api/:plugin/account.
@@ -54,6 +70,11 @@ export interface Plugin {
   // Gated at the handler by owner OR a structured cap (e.g. write:event:<id>); plugins
   // that don't expose writes leave this undefined.
   editItem?(jar: Jar, id: string, patch: unknown): Promise<unknown>;
+  // Optional cart-line substitute (amazon:cart-substitute, #98): remove one ASIN, add one
+  // comparable ASIN within a price band + same category. Server-side enforced; gated by owner
+  // OR the `amazon:cart-substitute` cap. Throws SubstituteDeniedError (code "denied") for any
+  // shape the cap must not permit; the handler maps that to 403.
+  substitute?(jar: Jar, op: Partial<SubstituteOp>): Promise<SubstituteResult>;
 
   // RFC 0007 §2.4: capability statement + sub-capabilities
   capability?: CapabilityStatement; // the plugin-wide (b2) statement

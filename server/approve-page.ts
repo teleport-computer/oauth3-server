@@ -18,7 +18,8 @@ export function approvePage(r: ConnectReq | undefined, id: string): string {
   // read-only line, so they get a loud ink2 warning block, not a quiet row.
   const writeEvents = (r.caps || []).filter((c) => c.startsWith("write:event:")).map((c) => c.slice("write:event:".length));
   const jarCap = !!r.caps?.includes("jar");
-  const writes = writeEvents.length > 0;
+  const cartSubCap = !!r.caps?.includes("amazon:cart-substitute");
+  const writes = writeEvents.length > 0 || cartSubCap;
   // The capability statement for the requested plugin, read straight from the enforced
   // ledger in scopes.ts (RFC 0009 step 1 / RFC 0004 anti-hollow-green): the shown sentence
   // is provably what the gate enforces, never an app-authored string that can drift.
@@ -67,6 +68,7 @@ export function approvePage(r: ConnectReq | undefined, id: string): string {
   ${frictionBanner}
   ${jarCap ? `<div class=consent><b>⚠ This app will receive your raw ${esc(r.plugin)} cookies</b> — the actual session credentials, not just a read. Only approve an app you trust to hold your session. Revocable at any time.</div>` : ""}
   ${writeEvents.map((e) => `<div class=consent><b>⚠ This app can EDIT event <code>${esc(e)}</code> on your ${esc(r.plugin)}.</b> A write action on your behalf, attenuated to that one event only — it cannot edit any other event, and only while this token is valid.</div>`).join("")}
+  ${cartSubCap ? `<div class=consent><b>⚠ This app can SUBSTITUTE one item in your Amazon cart.</b> It may remove one ASIN and add one comparable ASIN within a price band and the same category only — it cannot check out, add arbitrary items, change address/payment, or raise quantity. Revocable at any time.</div>` : ""}
   <div class=apphead><span class=label>requesting app</span><span class=appname>${esc(r.app || "(unnamed app)")}</span></div>
   <div class=row><span class=k>${writes ? "writes" : "reads"}</span><span class=v><span class=chip>${esc(r.plugin)}</span>${r.scope ? ` <span class=chip>${esc(r.scope)}</span>` : ""}</span></div>
   ${r.subject ? `<div class=row><span class=k>attributed to</span><span class=v>${esc(r.subject)}</span></div>` : ""}
