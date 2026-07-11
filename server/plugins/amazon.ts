@@ -29,8 +29,25 @@ import { cookieHeader, Jar, Plugin, PluginItem, SubstituteOp, SubstituteResult }
 // never read Deno.env at module top level (the isolated container runs --deny-env —
 // env arrives via the handler's ctx.env, same pattern as reddit/otter).
 let BASE = "https://www.amazon.com";
+// The in-TEE Browser SPI (login-with-anything/tee-browser) — the same instrument the twitter
+// path drives (server/twitter-actions.ts). The cart-substitute WRITE runs here, not as a raw
+// server-side replay: Amazon bot-walls the raw CSRF-scrape POST on TLS/behavioral fingerprint
+// (#98/#103), while OUR in-TEE browser performs the real signed add + remove with its own
+// page's anti-csrftoken-a2z and we reify the captured trajectory. These are the SHARED browser
+// creds (the handler also keeps BROWSER_SPI_URL/BROWSER_SPI_SECRET); amazon reads them through
+// this same configure seam so substitute(jar, op) needs no extra args.
+let SPI_URL = "";
+let SPI_SECRET = "";
+// Settle delay after a browser /navigate before /capture-trace (lets the logged-in XHR fire).
+// Overridable via configureAmazon so the SPI-mock test can zero it (no real browser to wait on).
+let NAV_DELAY_MS = 5000;
+let PRE_REMOVE_DELAY_MS = 3000;
 export function configureAmazon(env: Record<string, string>): void {
   if (env.AMAZON_BASE) BASE = env.AMAZON_BASE.replace(/\/$/, "");
+  SPI_URL = (env.BROWSER_SPI_URL || "").replace(/\/$/, "");
+  SPI_SECRET = env.BROWSER_SPI_SECRET || "";
+  if (env.BROWSER_NAV_DELAY_MS !== undefined) NAV_DELAY_MS = Number(env.BROWSER_NAV_DELAY_MS) || 0;
+  if (env.BROWSER_PRE_REMOVE_DELAY_MS !== undefined) PRE_REMOVE_DELAY_MS = Number(env.BROWSER_PRE_REMOVE_DELAY_MS) || 0;
 }
 
 const CART_PATH = "/gp/cart/view.html";
@@ -372,21 +389,12 @@ export function cartQtyFieldName(html: string, asin: string): string | undefined
   return undefined;
 }
 
-// Fetch a product's offer price + title from its DP page HTML (the addAsin side). Amazon bot-
-// defends this harder than the cart read, so on captcha/expired it throws a clear error and the
-// caller (substitute) fails CLOSED — the substitute is REFUSED, never silently allowed. Price
-// selectors are Amazon's standard DP containers, scraped at runtime; a miss yields "" and the
-// price-band check fails closed.
-async function fetchAsinOffer(jar: Jar, asin: string): Promise<{ price: string; title: string }> {
-  const r = await fetch(`${BASE}/dp/${asin}`, { headers: headers(jar), redirect: "follow", signal: AbortSignal.timeout(60_000) });
-  const html = await r.text();
-  if (isCaptcha(html, r.url)) {
-    throw new Error(
-      `amazon rejected the jar reading ASIN ${asin} — robot check; amazon is a BROWSER-PATH site for writes`,
-    );
-  }
-  if (r.status === 401 || r.status === 403) throw new Error(`amazon rejected the jar reading ASIN ${asin} — cookies expired`);
-  if (!r.ok) throw new Error(`amazon ASIN ${asin} ${r.status}: ${html.slice(0, 200)}`);
+// Pure scraper for a product's offer price + title off a /dp/<asin> page's HTML — the addAsin
+// side of a substitute. Amazon's standard DP containers, scraped at runtime; a miss yields ""
+// and the price-band check fails CLOSED. Exported so it is testable without a jar, and reused
+// by the browser path on the browser-captured DP dom (the raw server-side DP fetch that used to
+// live here bot-walls — see #103). Pure.
+export function parseAsinOffer(html: string): { price: string; title: string } {
   const title = textById(html, "productTitle") || "";
   const price =
     textById(html, "priceblock_ourprice") ||
@@ -395,6 +403,256 @@ async function fetchAsinOffer(jar: Jar, asin: string): Promise<{ price: string; 
     classText(html, "a-offscreen") ||
     "";
   return { price: price.trim(), title: cleanTitle(title) };
+}
+
+// --- #103: browser-path cart substitute (RFC 0001 reification) --------------------------
+// The raw server-side CSRF-scrape POST is the WRONG path for the cart-substitute WRITE
+// (#98/#103): it bot-walls on TLS/behavioral fingerprint even though the page's own
+// anti-csrftoken-a2z is readable. The in-TEE browser (ours) performs the real signed add +
+// remove with its own page's CSRF and full state, so we drive the Browser SPI, capture the
+// FULL network trajectory (/capture-trace), and reduce it to the cart API calls of interest
+// here — the ground truth an unofficial cart API is reified from. This mirrors the twitter
+// path exactly (server/twitter-actions.ts: browserTrace() + reifyTrace() over the OP_PATTERNS
+// map a.k.a. TWEET_OPS).
+
+const BROWSER_UA =
+  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
+function jarToBrowserCookies(jar: Jar) {
+  return Object.entries(jar).map(([name, value]) => ({
+    name, value, domain: ".amazon.com", path: "/", secure: true, httpOnly: false, sameSite: "no_restriction",
+  }));
+}
+
+// Which captured Amazon request carried out which cart write — the analog of the twitter
+// OP_PATTERNS map. The add endpoint is /gp/aws/cart/add.html (classic) or the smart-wagon
+// handle-buy-box / hz/cart/add AJAX; the remove is the cart /gp/cart/ajax/update.html AJAX
+// (a quantity.<n>=0 field marks a delete vs a plain update). The real anti-csrftoken-a2z rides
+// the request body (`csrf-token`) or a header, captured at the network layer — NOT scraped +
+// replayed server-side.
+const CART_ADD_RE = /\/gp\/aws\/cart\/add\.html\b|\/gp\/product\/handle-buy-box\b|\/hz\/cart\/add\b/;
+const CART_UPDATE_RE = /\/gp\/cart\/ajax\/update\.html\b/;
+const CART_OPS_RE = new RegExp(`${CART_ADD_RE.source}|${CART_UPDATE_RE.source}`);
+
+// Pull the first `name=value` field off a form-encoded body or query string (url-decoded).
+function formField(body: string, name: string): string | undefined {
+  if (!body) return undefined;
+  const re = new RegExp(`(?:^|[&?])${name}=([^&]*)`, "i");
+  const m = body.match(re);
+  return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : undefined;
+}
+function pickHeader(headers: Record<string, string>, name: string): string | undefined {
+  const lower: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) lower[k.toLowerCase()] = v;
+  return lower[name.toLowerCase()];
+}
+
+// Normalize a captured network_log entry to one field-name convention. The Browser SPI has
+// emitted two schemas (twitter-actions reads snake_case post_data/request_headers;
+// server/browser.ts documents camelCase requestBody/requestHeaders) — accept BOTH so the
+// reifier is robust to whichever the live bridge returns.
+function normEntry(e: {
+  method?: string; url?: string;
+  request_headers?: Record<string, string>; requestHeaders?: Record<string, string>;
+  post_data?: unknown; requestBody?: unknown;
+  status?: number;
+  response_body?: unknown; responseBody?: unknown;
+}): {
+  method: string; url: string; headers: Record<string, string>;
+  body: string; status: number | null; response: string;
+} {
+  const headers = (e.request_headers || e.requestHeaders || {}) as Record<string, string>;
+  const body = e.post_data ?? e.requestBody ?? "";
+  const response = e.response_body ?? e.responseBody ?? "";
+  return {
+    method: (e.method || "GET").toUpperCase(),
+    url: e.url || "",
+    headers: typeof headers === "object" && headers ? headers : {},
+    body: typeof body === "string" ? body : String(body),
+    status: typeof e.status === "number" ? e.status : null,
+    response: typeof response === "string" ? response : "",
+  };
+}
+
+// The analog of twitter-actions.reifyTrace: reduce a captured Amazon network_log to the cart
+// API calls of interest. `action` ("cart.add" | "cart.remove" | "cart.update") filters;
+// omit it for every cart op. Each reified op carries the real anti-CSRF token (from the
+// request body `csrf-token` field or the `anti-csrftoken-a2z` header — captured at the
+// network layer, never scraped-and-replayed server-side) plus the ASIN/qty + status. Pure.
+export function reifyAmazonTrace(networkLog: unknown[], action?: string): unknown[] {
+  const out: unknown[] = [];
+  for (const raw of networkLog || []) {
+    const e = normEntry(raw as Parameters<typeof normEntry>[0]);
+    if (!CART_OPS_RE.test(e.url)) continue;
+    let op: string;
+    if (CART_ADD_RE.test(e.url)) op = "cart.add";
+    else op = /quantity\.[^=]+=0(?:&|$)/i.test(e.body) || /\bdelete\b/i.test(e.url) ? "cart.remove" : "cart.update";
+    if (action && op !== action) continue;
+    let asinUrl: URL | null = null;
+    try { asinUrl = new URL(e.url, BASE); } catch { /* relative or malformed — fall back to body only */ }
+    const asin =
+      formField(e.body, "ASIN") ||
+      formField(e.body, "ASIN.1") ||
+      (asinUrl ? asinUrl.searchParams.get("ASIN.1") || asinUrl.searchParams.get("ASIN") : null);
+    const qty = formField(e.body, "Quantity") || formField(e.body, "Quantity.1");
+    const csrf = formField(e.body, "csrf-token") || pickHeader(e.headers, "anti-csrftoken-a2z") || null;
+    out.push({
+      op,
+      method: e.method,
+      url: e.url.split("?")[0],
+      asin: asin || null,
+      qty: qty || null,
+      csrf_token: csrf,
+      status: e.status,
+      response_body: e.response ? e.response.slice(0, 400) : null,
+    });
+  }
+  return out;
+}
+
+// --- Browser SPI bridge (mirrors server/twitter-actions.ts bridge + server/browser.ts spi) ---
+
+async function browserSpi(spiUrl: string, path: string, body: unknown, secret: string): Promise<any> {
+  const r = await fetch(`${spiUrl}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(90_000),
+  });
+  if (!r.ok) throw new Error(`browser SPI ${path} ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  return r.json();
+}
+
+// Inject the jar + navigate + /capture-trace in one step (mirrors browser.browserCaptureTrace).
+async function browserNavigate(
+  spiUrl: string, jar: Jar, targetUrl: string, secret: string,
+): Promise<{ dom_html: string; network_log: unknown[]; url: string }> {
+  await browserSpi(spiUrl, "/session", { cookies: jarToBrowserCookies(jar), userAgent: BROWSER_UA }, secret);
+  await browserSpi(spiUrl, "/navigate", { url: targetUrl }, secret);
+  if (NAV_DELAY_MS > 0) await new Promise((res) => setTimeout(res, NAV_DELAY_MS)); // let logged-in XHR settle
+  const t = await browserSpi(spiUrl, "/capture-trace", {}, secret);
+  return { dom_html: t.dom_html || "", network_log: t.network_log || [], url: t.url || targetUrl };
+}
+
+// Re-capture after an actuation (jar already injected) — navigate + /capture-trace.
+async function browserCapture(
+  spiUrl: string, secret: string, targetUrl: string,
+): Promise<{ dom_html: string; network_log: unknown[]; url: string }> {
+  await browserSpi(spiUrl, "/navigate", { url: targetUrl }, secret);
+  if (NAV_DELAY_MS > 0) await new Promise((res) => setTimeout(res, NAV_DELAY_MS));
+  const t = await browserSpi(spiUrl, "/capture-trace", {}, secret);
+  return { dom_html: t.dom_html || "", network_log: t.network_log || [], url: t.url || targetUrl };
+}
+
+// Run a script in the browser. The in-TEE browser runs its OWN page JS (proven in #98: it
+// reads its own page's anti-csrftoken-a2z + full state normally), so clicking the Add-to-
+// Cart button / submitting the active-cart form are real user actions it performs — the
+// signed add.html / cart-update AJAX the network layer then captures. Returns the script's
+// value (a short status string) so the caller can surface an honest no-op.
+async function browserEval(spiUrl: string, script: string, secret: string): Promise<unknown> {
+  const r = await browserSpi(spiUrl, "/eval", { script }, secret);
+  return (r as { text?: unknown }).text ?? r;
+}
+
+// Click the Add-to-Cart button on the DP page (id=add-to-cart-button is Amazon's standard;
+// fall back to the first add-to-cart button). Real user action -> real signed add request.
+const ADD_TO_CART_CLICK =
+  "(function(){var b=document.getElementById('add-to-cart-button')||document.querySelector('button[data-csa-c-type=item],input#add-to-cart-button');if(b){b.click();return 'clicked';}return 'no-add-button';})();";
+
+// Set the removeAsin quantity field to 0 and submit activeCartViewForm (the browser performs
+// the real cart-update AJAX with the page's own anti-csrftoken-a2z). qtyName is the scraped
+// field name for that row (cartQtyFieldName); csrf is the scraped token, re-injected if the
+// form lacks the hidden field. Best-effort zeroes the first quantity field when no name was
+// scraped — the reified ops + the after re-read are the ground-truth check either way.
+function removeLineScript(qtyName: string | undefined, csrf: string | null): string {
+  const setQty = qtyName
+    ? `var i=document.querySelector('input[name="${qtyName}"]');if(i){i.value='0';}`
+    : `var i=document.querySelector('.sc-quantity-textfield');if(i){i.value='0';}`;
+  const ensureCsrf = csrf
+    ? `if(!f.querySelector('input[name=csrf-token]')){var h=document.createElement('input');h.type='hidden';h.name='csrf-token';h.value=${JSON.stringify(csrf)};f.appendChild(h);}`
+    : "";
+  return `(function(){${setQty}var f=document.forms['activeCartViewForm']||document.querySelector('form[name=\\"activeCartViewForm\\"]');if(!f)return 'no-active-cart-form';${ensureCsrf}f.submit();return 'submitted';})();`;
+}
+
+// Drive the in-TEE browser to perform the cart substitute, capture the full trajectory, and
+// reify it. Mirrors browserTrace (twitter) + browserFeed (browser.ts). Server-side policy
+// (price band, same category, remove-one+add-one, qty bound) runs on BROWSER-CAPTURED ground
+// truth BEFORE any actuation and throws SubstituteDeniedError for any shape the cap must not
+// permit (NO actuation on a denial). The live write proof (issue acceptance #1) is operator-
+// run against a logged-in session; this is the verifiable instrument + the reified evidence.
+export async function browserSubstitute(
+  spiUrl: string, jar: Jar, op: SubstituteOp, secret: string,
+): Promise<SubstituteResult> {
+  if (!spiUrl) throw new Error("BROWSER_SPI_URL not configured — no browser SPI to drive");
+  const { removeAsin, addAsin } = op;
+  // qty rides the add click's Quantity on the DP page; the shape gate (normalizeSubstitute)
+  // already bounded it before this runs.
+
+  // 1. inject jar + navigate the cart + capture: BEFORE state, the mutation form, the qty field.
+  const cartUrl = `${BASE}${CART_PATH}`;
+  const beforeCap = await browserNavigate(spiUrl, jar, cartUrl, secret);
+  if (isCaptcha(beforeCap.dom_html, beforeCap.url)) {
+    throw new Error("amazon browser-path: cart page came back as a robot check — sync a fresh jar");
+  }
+  const before = parseCart(beforeCap.dom_html);
+  const removed = before.find((l) => l.asin === removeAsin);
+  if (!removed) throw new SubstituteDeniedError(`removeAsin ${removeAsin} is not in the active cart`);
+  const form = parseCartUpdateForm(beforeCap.dom_html);
+  const qtyName = cartQtyFieldName(beforeCap.dom_html, removeAsin);
+
+  // 2. navigate the addAsin DP page + capture: its offer price + title (the addAsin side).
+  const dpCap = await browserNavigate(spiUrl, jar, `${BASE}/dp/${addAsin}`, secret);
+  if (isCaptcha(dpCap.dom_html, dpCap.url)) {
+    throw new Error(`amazon browser-path: ASIN ${addAsin} DP page came back as a robot check — sync a fresh jar`);
+  }
+  const offer = parseAsinOffer(dpCap.dom_html);
+
+  // 3. SERVER-SIDE POLICY GATE on browser-captured ground truth — deny BEFORE any actuation.
+  if (!priceBandOk(removed.price, offer.price)) {
+    throw new SubstituteDeniedError(
+      `addAsin ${addAsin} (${offer.price || "?"}) is outside the substitute price band of ${removeAsin} (${removed.price}) — refused`,
+    );
+  }
+  if (!sameCategory(removed.title, offer.title)) {
+    throw new SubstituteDeniedError(
+      `addAsin ${addAsin} is a different category than ${removeAsin} — substitute must stay within the same category`,
+    );
+  }
+
+  // 4. ACTUATE the add: click Add-to-Cart on the DP page (real signed add request in the trace).
+  await browserEval(spiUrl, ADD_TO_CART_CLICK, secret);
+
+  // 5. ACTUATE the remove: on the cart, zero the removeAsin line + submit activeCartViewForm
+  //    (real signed cart-update AJAX in the trace).
+  await browserSpi(spiUrl, "/navigate", { url: cartUrl }, secret);
+  if (PRE_REMOVE_DELAY_MS > 0) await new Promise((res) => setTimeout(res, PRE_REMOVE_DELAY_MS));
+  const rmStatus = await browserEval(spiUrl, removeLineScript(qtyName, form?.csrfToken || null), secret);
+  if (rmStatus === "no-active-cart-form") {
+    throw new Error(
+      "amazon browser-path: the cart page carried no activeCartViewForm — could not actuate the remove; perform the edit via the browser path",
+    );
+  }
+
+  // 6. capture the AFTER cart dom + the FULL network trajectory, and reify the cart writes.
+  const afterCap = await browserCapture(spiUrl, secret, cartUrl);
+  const after = parseCart(afterCap.dom_html);
+  const ops = reifyAmazonTrace(afterCap.network_log);
+
+  // 7. confirm against ground truth (no local mutation): the add appeared, the remove is gone.
+  const added = after.find((l) => l.asin === addAsin);
+  if (!added) {
+    throw new Error(
+      `substitute actuated but addAsin ${addAsin} did not appear on re-read — amazon likely bot-walled the browser write; inspect the reified ops`,
+    );
+  }
+  return {
+    removed,
+    added: { asin: added.asin, title: added.title, price: added.price },
+    before,
+    after,
+    path: "browser-path",
+    ops,
+  };
 }
 
 export const amazonPlugin: Plugin = {
@@ -424,104 +682,24 @@ export const amazonPlugin: Plugin = {
     return hit;
   },
 
-  // The write behind the `amazon:cart-substitute` cap (#98). Server-side scope enforcement
-  // (normalize + price band + same category + qty bound) runs BEFORE the network write and
-  // throws SubstituteDeniedError for any shape the cap must NOT permit; the handler maps that
-  // to 403. The mutation POSTs the remove (line qty → 0) + add (new ASIN × qty) with the CSRF
-  // token scraped off the REAL cart page, then re-reads to confirm. Writes are the part of
-  // Amazon most likely to hit the bot wall from a server-side replay — on captcha/non-success
-  // it throws a clear browser-path error (never masks a failure as success). The live write
+  // The write behind the `amazon:cart-substitute` cap (#98), driven via the in-TEE Browser
+  // SPI (#103). Server-side scope enforcement (normalize + price band + same category + qty
+  // bound) runs BEFORE any actuation and throws SubstituteDeniedError for any shape the cap
+  // must NOT permit; the handler maps that to 403. The actuation drives the REAL logged-in
+  // browser (inject jar → add ASIN Y → remove ASIN X → /capture-trace → reify), which performs
+  // the signed add.html + cart-update AJAX with its own anti-csrftoken-a2z; the reified ops
+  // (cart.add + cart.remove) are returned as ground-truth evidence (RFC 0001). The raw server-
+  // side CSRF-scrape POST is DEMOTED: it bot-walls on TLS/behavioral fingerprint even though
+  // the CSRF token is readable (#98/#103), so with no Browser SPI configured substitute()
+  // throws the documented browser-path error rather than replay a dead end. The live write
   // proof (issue acceptance #1) is operator-run against a logged-in session.
   async substitute(jar: Jar, op: Partial<SubstituteOp>): Promise<SubstituteResult> {
-    const { removeAsin, addAsin, qty } = normalizeSubstitute(op);
-    const { lines: before, html } = await readCartWithHtml(jar);
-    const removed = before.find((l) => l.asin === removeAsin);
-    if (!removed) {
-      throw new SubstituteDeniedError(`removeAsin ${removeAsin} is not in the active cart`);
-    }
-
-    // Resolve the addAsin's price + title server-side; fail CLOSED on a bot wall / unreadable
-    // price (the substitute is REFUSED, never silently allowed).
-    let offer: { price: string; title: string };
-    try {
-      offer = await fetchAsinOffer(jar, addAsin);
-    } catch {
-      throw new SubstituteDeniedError(
-        `could not verify addAsin ${addAsin} (price unreadable / amazon browser-path) — substitute refused`,
-      );
-    }
-    if (!priceBandOk(removed.price, offer.price)) {
-      throw new SubstituteDeniedError(
-        `addAsin ${addAsin} (${offer.price || "?"}) is outside the substitute price band of ${removeAsin} (${removed.price}) — refused`,
-      );
-    }
-    if (!sameCategory(removed.title, offer.title)) {
-      throw new SubstituteDeniedError(
-        `addAsin ${addAsin} is a different category than ${removeAsin} — substitute must stay within the same category`,
-      );
-    }
-
-    // Scrape the REAL mutation form + anti-CSRF token off the cart page (runtime markup, never
-    // a hardcoded fixture). No form → honest browser-path error (do NOT guess field names).
-    const form = parseCartUpdateForm(html);
-    if (!form) {
+    const norm = normalizeSubstitute(op); // shape gate (throws SubstituteDeniedError → 403)
+    if (!SPI_URL) {
       throw new Error(
-        "could not find the active-cart mutation form on the cart page — amazon is a BROWSER-PATH site for writes; perform the edit via the browser path",
+        "amazon cart writes are BROWSER-PATH — the raw server-side CSRF-scrape POST bot-walls on TLS/behavioral fingerprint even though the CSRF token is readable; set BROWSER_SPI_URL (handler env) to drive the in-TEE browser that performs the real signed add + remove (#103)",
       );
     }
-
-    // REMOVE the line: set its scraped quantity field to 0 on the cart-update form.
-    const qtyName = cartQtyFieldName(html, removeAsin);
-    const removeBody = new URLSearchParams();
-    if (qtyName) removeBody.set(qtyName, "0");
-    if (form.csrfToken) removeBody.set("csrf-token", form.csrfToken);
-    const rm = await fetch(`${BASE}${form.action}`, {
-      method: "POST",
-      headers: { ...headers(jar), "Content-Type": "application/x-www-form-urlencoded", "Referer": `${BASE}${CART_PATH}` },
-      body: removeBody.toString(),
-      redirect: "manual",
-      signal: AbortSignal.timeout(60_000),
-    });
-    const rmHtml = await rm.text();
-    if (isCaptcha(rmHtml, rm.url) || rm.status >= 400) {
-      throw new Error(
-        `amazon refused the cart-remove write (${rm.status}${isCaptcha(rmHtml, rm.url) ? "; robot check" : ""}) — writes are BROWSER-PATH; perform the edit via the browser path`,
-      );
-    }
-
-    // ADD the substitute ASIN at qty via the documented add endpoint, with the same CSRF.
-    const addBody = new URLSearchParams();
-    addBody.set("ASIN", addAsin);
-    addBody.set("Quantity", String(qty));
-    if (form.csrfToken) addBody.set("csrf-token", form.csrfToken);
-    const ad = await fetch(`${BASE}/gp/aws/cart/add.html`, {
-      method: "POST",
-      headers: { ...headers(jar), "Content-Type": "application/x-www-form-urlencoded", "Referer": `${BASE}/dp/${addAsin}` },
-      body: addBody.toString(),
-      redirect: "manual",
-      signal: AbortSignal.timeout(60_000),
-    });
-    const adHtml = await ad.text();
-    if (isCaptcha(adHtml, ad.url) || ad.status >= 400) {
-      throw new Error(
-        `amazon refused the cart-add write (${ad.status}${isCaptcha(adHtml, ad.url) ? "; robot check" : ""}) — writes are BROWSER-PATH; perform the edit via the browser path`,
-      );
-    }
-
-    // Confirm against the truth: re-read and verify the swap actually took (no local mutation).
-    const after = await readCart(jar);
-    const added = after.find((l) => l.asin === addAsin);
-    if (!added) {
-      throw new Error(
-        `substitute posted but addAsin ${addAsin} did not appear on re-read — amazon likely bot-walled the write; perform the edit via the browser path`,
-      );
-    }
-    return {
-      removed,
-      added: { asin: added.asin, title: added.title, price: added.price },
-      before,
-      after,
-      path: "server-replay",
-    };
+    return browserSubstitute(SPI_URL, jar, norm, SPI_SECRET);
   },
 };
