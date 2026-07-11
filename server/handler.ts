@@ -126,6 +126,11 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
 
   const url = new URL(req.url);
   const path = url.pathname;
+  // Version pin (CONSTITUTION Tier 1): lets an HTTP transcript pin the running core to a
+  // PR commit. GIT_SHA is injected at deploy (env); "dev" when unset (local/in-process).
+  if (req.method === "GET" && path === "/_api/version") {
+    return json({ service: "oauth3-server", commit: ctx.env?.GIT_SHA || "dev" });
+  }
   const origin = publicUrl || url.origin;
   // Session = a token in the Authorization header (the daemon proxy forwards it;
   // it strips cookies). The login/approve pages keep it in localStorage.
