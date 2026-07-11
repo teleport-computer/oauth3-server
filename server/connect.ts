@@ -4,6 +4,7 @@
 // requestId. The app never holds the owner secret.
 
 import { mint } from "./tokens.ts";
+import { recordTokenUse } from "./stepup.ts";
 import { route } from "./routing.ts";
 import type { RouteResult } from "./types.ts";
 
@@ -77,6 +78,10 @@ export async function approveConnect(id: string, approver: string): Promise<Conn
   // The minted token carries the requested caps (e.g. write:event:<id>) only after the
   // approver sees them on the consent screen — informed consent for a write capability.
   const t = await mint(r.plugin, approver, r.app, r.caps);
+  // RFC 0005 step-up: an owner-approved connect IS the out-of-band consent. Pre-mark the
+  // freshly minted token as used so its first read does not trip step-up again (the owner
+  // just granted it on the approve screen). oauth3-server#106 acceptance bullet 2.
+  await recordTokenUse(t.token, r.plugin);
   r.status = "approved";
   r.token = t.token;
   await persist();
