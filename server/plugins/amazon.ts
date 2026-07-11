@@ -105,6 +105,11 @@ function inputValue(html: string, cls: string): string | undefined {
 // falling back to data-quantity. Exported so it is testable without a jar.
 export function parseCart(html: string): CartLine[] {
   const lines: CartLine[] = [];
+  // The page lists the ACTIVE cart, then a "Saved for later" section below a
+  // sc-save-for-later-divider. Saved items are also sc-list-item[data-asin] but are NOT in the
+  // cart — cut everything from the divider on so only genuine cart lines are parsed.
+  const sfl = html.search(/sc-save-for-later/i);
+  if (sfl !== -1) html = html.slice(0, sfl);
   // Opening tags carrying the standalone `sc-list-item` class (not sc-list-item-content
   // / -border-less on their own — the (?![\w-]) lookahead requires a real token break).
   const openRe = /<([a-zA-Z][a-zA-Z0-9]*)\b[^>]*\bclass="[^"]*\bsc-list-item(?![\w-])[^"]*"[^>]*>/gi;
