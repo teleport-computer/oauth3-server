@@ -105,8 +105,54 @@ export function siteToPlugin(m: SiteManifest): Plugin {
   return p;
 }
 
-// Load every ./sites/*.json manifest → plugins + the scope/capability entries the gate,
-// approve page, and /api/scopes consume. Called once at startup by registry.ts + scopes.ts.
+// The scope ingredients + capability sentence a manifest contributes to the ledgers —
+// keyed and shaped exactly like the hand-written entries in scopes.ts.
+export function manifestScopes(m: SiteManifest): {
+  ingredients: Record<string, { plugin: string; reads: string[]; label: string }>;
+  capabilities: Record<string, { plugin: string; statement: string }>;
+} {
+  const ingredients: Record<string, { plugin: string; reads: string[]; label: string }> = {};
+  for (const s of m.scopes ?? []) ingredients[s.id] = { plugin: m.id, reads: s.reads, label: s.label };
+  return { ingredients, capabilities: { [m.id]: { plugin: m.id, statement: m.capability } } };
+}
+
+// Reject a malformed or unsafe manifest at registration time (not at read time). The
+// host-pin check here means a bad manifest can never be wired up to point the jar at an
+// off-domain host; a scope may only grant reads the manifest actually declares.
+const READ_KINDS = ["items", "account", "item"] as const;
+export function validateManifest(m: SiteManifest): void {
+  if (!m || typeof m !== "object") throw new Error("manifest must be an object");
+  if (!/^[a-z0-9-]+$/.test(m.id ?? "")) throw new Error("manifest.id must be url-safe [a-z0-9-]");
+  if (!m.label) throw new Error("manifest.label required");
+  if (!Array.isArray(m.cookieDomains) || m.cookieDomains.length === 0) throw new Error("manifest.cookieDomains required");
+  if (!m.loginCookie) throw new Error("manifest.loginCookie required");
+  if (!m.reads?.items && !m.reads?.account) throw new Error("manifest.reads needs at least items or account");
+  if (!/\bCAN\b/.test(m.capability ?? "") || !/\bCANNOT\b/.test(m.capability ?? "")) throw new Error("manifest.capability must say CAN and CANNOT");
+  const domains = m.cookieDomains.map((d) => d.replace(/^\./, ""));
+  for (const [kind, r] of Object.entries(m.reads)) {
+    if (!(READ_KINDS as readonly string[]).includes(kind)) throw new Error(`unknown read kind ${kind}`);
+    if (!r?.url) throw new Error(`read ${kind} needs a url`);
+    if (r.auth !== false) {
+      const host = hostOf(r.url.replaceAll("{user}", "x").replaceAll("{id}", "x"));
+      if (!domains.some((d) => host === d || host.endsWith("." + d))) throw new Error(`authed read ${kind} host ${host} is not a cookieDomain`);
+    }
+  }
+  const declared = new Set(Object.keys(m.reads));
+  for (const s of m.scopes ?? []) for (const rd of s.reads) if (!declared.has(rd)) throw new Error(`scope ${s.id} grants read '${rd}' the manifest doesn't declare`);
+}
+
+// Read every *.json manifest in a dir (missing dir → []). Used for both the bundled
+// example sites (./sites/) and runtime-registered sites (${dataDir}/sites/).
+export function loadSiteManifests(dir: string | URL): SiteManifest[] {
+  let entries: Deno.DirEntry[];
+  try { entries = [...Deno.readDirSync(dir)]; } catch { return []; }
+  const read = (name: string) => Deno.readTextFileSync(dir instanceof URL ? new URL(name, dir) : `${dir}/${name}`);
+  return entries.filter((e) => e.isFile && e.name.endsWith(".json"))
+    .map((e) => JSON.parse(read(e.name)) as SiteManifest);
+}
+
+// Load bundled ./sites/*.json → plugins + ledger entries. Called at startup by
+// registry.ts + scopes.ts (runtime-registered sites go through sites.ts instead).
 export function loadSites(dir = new URL("./sites/", import.meta.url)): {
   plugins: Plugin[];
   ingredients: Record<string, { plugin: string; reads: string[]; label: string }>;
@@ -115,14 +161,11 @@ export function loadSites(dir = new URL("./sites/", import.meta.url)): {
   const plugins: Plugin[] = [];
   const ingredients: Record<string, { plugin: string; reads: string[]; label: string }> = {};
   const capabilities: Record<string, { plugin: string; statement: string }> = {};
-  let entries: Deno.DirEntry[];
-  try { entries = [...Deno.readDirSync(dir)]; } catch { return { plugins, ingredients, capabilities }; }
-  for (const e of entries) {
-    if (!e.isFile || !e.name.endsWith(".json")) continue;
-    const m = JSON.parse(Deno.readTextFileSync(new URL(e.name, dir))) as SiteManifest;
+  for (const m of loadSiteManifests(dir)) {
     plugins.push(siteToPlugin(m));
-    capabilities[m.id] = { plugin: m.id, statement: m.capability };
-    for (const s of m.scopes ?? []) ingredients[s.id] = { plugin: m.id, reads: s.reads, label: s.label };
+    const s = manifestScopes(m);
+    Object.assign(ingredients, s.ingredients);
+    Object.assign(capabilities, s.capabilities);
   }
   return { plugins, ingredients, capabilities };
 }
