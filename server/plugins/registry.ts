@@ -15,3 +15,6 @@ for (const p of loadSites().plugins) plugins.set(p.id, p);
 
 export function getPlugin(id: string): Plugin | undefined { return plugins.get(id); }
 export function allPlugins(): Plugin[] { return [...plugins.values()]; }
+// Runtime registration of a declarative site (POST /api/sites), via sites.ts.
+export function registerSitePlugin(p: Plugin): void { plugins.set(p.id, p); }
+export function unregisterSitePlugin(id: string): boolean { return plugins.delete(id); }

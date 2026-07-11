@@ -101,6 +101,21 @@ export const PLUGIN_CAPABILITIES: Record<string, { plugin: string; statement: st
   Object.assign(PLUGIN_CAPABILITIES, capabilities);
 }
 
+// Runtime registration of a declarative site's scopes + capability (POST /api/sites, via
+// sites.ts) — merged into the SAME ledgers, so a dynamically-added site's scope enforces
+// and renders identically to an in-tree one. Unregister removes them again.
+export function registerSiteScopes(
+  ingredients: Record<string, { plugin: string; reads: string[]; label: string }>,
+  capabilities: Record<string, { plugin: string; statement: string }>,
+): void {
+  Object.assign(SCOPE_INGREDIENTS, ingredients);
+  Object.assign(PLUGIN_CAPABILITIES, capabilities);
+}
+export function unregisterSiteScopes(pluginId: string): void {
+  for (const id of Object.keys(SCOPE_INGREDIENTS)) if (SCOPE_INGREDIENTS[id].plugin === pluginId) delete SCOPE_INGREDIENTS[id];
+  delete PLUGIN_CAPABILITIES[pluginId];
+}
+
 // The full plugin-capability ledger (one statement per in-tree plugin). Public/read-only.
 export function pluginCapabilities(): { plugin: string; statement: string }[] {
   return Object.values(PLUGIN_CAPABILITIES);
