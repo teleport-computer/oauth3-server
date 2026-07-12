@@ -114,10 +114,10 @@ issue adds one, it belongs in [`http-api.md`](./http-api.md).
 
 ## 5. Seeding a cookie jar for a new instance
 
-Three ingest paths (journeys J1/J2 + the API-key path). All write the same sealed vault
+Three ingest paths (smoke checks S1/S2 + the API-key path). All write the same sealed vault
 (`DATA_DIR/vault.sealed`, keyed `<subject>:<plugin>`).
 
-**A. Paste-cookie (no extension, no browser) — J1.** Copy the cookie from DevTools
+**A. Paste-cookie (no extension, no browser) — S1.** Copy the cookie from DevTools
 (Application → Cookies) and POST it as the owner (or a session):
 
 ```bash
@@ -129,7 +129,7 @@ curl -s localhost:3000/api/cookies \
 deno run -A cli.ts sync otter --cookie 'sessionid=…,csrftoken=…' --owner $OWNER_SECRET
 ```
 
-**B. Extension (auto-sync) — J2.** Load `oauth3-extension` unpacked, set the instance URL +
+**B. Extension (auto-sync) — S2.** Load `oauth3-extension` unpacked, set the instance URL +
 owner secret, pick the plugin, **Sync jar now**. It then re-syncs on cookie-change + a 30m
 alarm, keeping the jar fresh with no further action.
 

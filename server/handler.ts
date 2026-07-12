@@ -147,7 +147,11 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   if (req.method === "GET" && path === "/terms") return html(termsPage(ctx.env));
   if (req.method === "GET" && path === "/evidence") return html(evidencePage(ctx.env));
 
-  // User journeys test report — static HTML from disk if available.
+  // Smoke-check report — static HTML from disk if available.
+  // NOTE: route/path is still `/journeys` (+ `POST /api/journeys`, `data/journeys/`) because
+  // the paseo-batch cron uploads the generated report here; renaming it is a cross-system
+  // change that must land atomically with the paseo-batch writer (see #81). The persona docs
+  // were renamed to "smoke checks" (S1–S7) in SMOKE-CHECKS.md.
   if (req.method === "GET" && (path === "/journeys" || path === "/journeys/")) {
     const journeysPath = (ctx.dataDir || ".") + "/journeys/index.html";
     try {

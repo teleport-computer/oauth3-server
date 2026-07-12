@@ -70,7 +70,7 @@ So a plugin author's contract is: be honest in `loggedIn` (a real key cookie), k
 `listItems`/`fetchItem` pure functions of the jar, and **propagate** site errors (a thrown
 error becomes a `502` with the message — do not swallow/mask).
 
-## Authoring a new plugin (J6)
+## Authoring a new plugin (S6)
 
 1. Log into the site in a normal browser; open DevTools → Network; do the thing you want to
    read (open the saved list, history, …). Save a HAR.
@@ -102,4 +102,4 @@ error becomes a `502` with the message — do not swallow/mask).
 - Paginate / cap page sizes if a full list trips gateway timeouts.
 
 The pattern is proven end-to-end: `otter`, `reddit`, `nytimes`, `youtube` were all added this
-way with **no core changes** (journey J6 ●). The only hard part is reading the live HAR.
+way with **no core changes** (smoke check S6 ●). The only hard part is reading the live HAR.
