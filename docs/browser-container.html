@@ -5,111 +5,95 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>oauth3 — the browser container</title>
 <link rel="icon" type="image/png" href="icon.png">
+<link rel="stylesheet" href="watermelon.css">
 <style>
-  :root {
-    --ink: #16140f; --paper: #f4f0e7; --panel: #ece6d9; --faint: #6b6557;
-    --rule: #d8d2c4; --accent: #b4441f; --green: #3f7a3f;
-    --gutter: clamp(20px, 7vw, 130px);
-    --mono: ui-monospace, SFMono-Regular, Menlo, "Cascadia Code", monospace;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--paper); color: var(--ink);
-    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif; line-height: 1.5; }
-  a { color: inherit; }
-  .wrap { max-width: 860px; margin: 0 auto; padding: 0 var(--gutter) 80px; }
-  header.top { display: flex; justify-content: space-between; align-items: center;
-    padding: 26px var(--gutter) 0; font-family: var(--mono); font-size: 12px;
-    letter-spacing: .12em; text-transform: lowercase; color: var(--faint); }
-  header.top .brand { color: var(--ink); font-weight: 600; letter-spacing: .04em; }
-  header.top a { text-decoration: none; border-bottom: 1px solid var(--accent); color: var(--ink); }
-  h1 { font-size: clamp(26px, 4vw, 38px); line-height: 1.15; margin: 30px 0 6px; }
+  .wrap { padding-bottom: 80px; }
+  h1.lede-h1 { font: 800 clamp(26px, 4vw, 38px)/1.1 var(--cond); text-transform: uppercase; letter-spacing: .01em; margin: 30px 0 6px; color: var(--ink1); text-shadow: var(--off) var(--off) 0 var(--ink2); }
   .lede { font-size: clamp(17px, 2.4vw, 20px); color: var(--faint); margin: 0 0 8px; max-width: 30em; }
-  h2 { font-family: var(--mono); font-weight: 500; font-size: 12px; letter-spacing: .18em;
-    text-transform: lowercase; color: var(--accent); margin: 40px 0 14px; }
 
-  /* the diagram */
-  .diagram { display: grid; grid-template-columns: 1fr auto 1.3fr auto 1fr; align-items: stretch;
-    gap: 0; margin: 8px 0 4px; }
+  /* the diagram — three zones; the sealed TEE stays dark (the system's --deep block) */
+  .diagram { display: grid; grid-template-columns: 1fr auto 1.3fr auto 1fr; align-items: stretch; gap: 0; margin: 8px 0 4px; }
   @media (max-width: 720px) { .diagram { grid-template-columns: 1fr; } .arrow { transform: rotate(90deg); padding: 6px 0; } }
-  .zone { border: 1px solid var(--rule); border-radius: 14px; padding: 16px 16px 18px; background: var(--panel); }
-  .zone.tee { background: #14120d; color: #ece6d9; border-color: #14120d; position: relative; }
-  .zone .ztag { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
-    color: var(--accent); margin-bottom: 8px; }
-  .zone.tee .ztag { color: #e6915f; }
-  .zone .zname { font-size: 18px; margin-bottom: 6px; }
+  .zone { border: 1px solid var(--rule); padding: 16px 16px 18px; background: var(--card); }
+  .zone.tee { background: var(--deep); color: var(--block-text); border-color: var(--deep); border-left: 12px solid var(--ink2); position: relative; }
+  .zone .ztag { font: 500 10px/1 var(--mono); letter-spacing: .14em; text-transform: lowercase; color: var(--i2-text); margin-bottom: 8px; }
+  .zone.tee .ztag { color: color-mix(in srgb, var(--ink2) 75%, #fff); }
+  .zone .zname { font: 800 18px/1.2 var(--cond); text-transform: uppercase; letter-spacing: .02em; margin-bottom: 6px; color: var(--text); }
+  .zone.tee .zname { color: var(--block-text); }
   .zone p { font-size: 13.5px; margin: 6px 0 0; color: var(--faint); }
-  .zone.tee p { color: #b8b2a3; }
-  .zone .box { border: 1px dashed #4a4436; border-radius: 9px; padding: 9px 11px; margin-top: 10px;
-    font-family: var(--mono); font-size: 12px; color: #ece6d9; }
-  .zone .lock { color: var(--green); font-weight: 600; }
-  .zone.tee .lock { color: #7ec77e; }
-  .arrow { display: flex; align-items: center; justify-content: center; padding: 0 10px;
-    font-family: var(--mono); color: var(--accent); font-size: 13px; white-space: nowrap; }
-  .arrow small { display:block; font-size: 10px; color: var(--faint); text-align:center; letter-spacing:.06em; }
+  .zone.tee p { color: color-mix(in srgb, var(--block-text) 72%, var(--deep)); }
+  .zone .box { border: 1px dashed var(--ink2); padding: 9px 11px; margin-top: 10px; font: 500 12px var(--mono); color: var(--block-text); }
+  .zone .lock { color: var(--ink1); font-weight: 700; }
+  .zone.tee .lock { color: color-mix(in srgb, var(--ink1) 60%, #fff); }
+  .arrow { display: flex; align-items: center; justify-content: center; padding: 0 10px; font: 700 14px var(--mono); color: var(--i2-text); white-space: nowrap; }
+  .arrow small { display: block; font-size: 10px; color: var(--faint); text-align: center; letter-spacing: .06em; font-weight: 500; }
 
   ol.steps { counter-reset: s; list-style: none; padding: 0; margin: 6px 0 0; }
   ol.steps li { position: relative; padding: 10px 0 10px 42px; border-bottom: 1px solid var(--rule); }
   ol.steps li:before { counter-increment: s; content: counter(s); position: absolute; left: 0; top: 9px;
-    width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: var(--paper);
-    font-family: var(--mono); font-size: 13px; display: flex; align-items: center; justify-content: center; }
-  ol.steps b { font-weight: 600; }
+    width: 28px; height: 28px; border-radius: 50%; background: var(--ink1); color: #fff;
+    font: 700 13px/28px var(--mono); text-align: center; }
+  ol.steps b { font-weight: 700; }
   ol.steps .k { font-size: 13.5px; color: var(--faint); }
-  code { font-family: var(--mono); font-size: .85em; background: var(--panel); padding: 1px 5px; border-radius: 4px; }
-  .zone.tee code { background: #2a2519; color: #e6915f; }
-  .spi { font-family: var(--mono); font-size: 12.5px; color: var(--faint); margin-top: 8px; }
-  .spi span { color: var(--accent); }
-  .prop { border-left: 3px solid var(--green); padding: 4px 0 4px 14px; margin: 14px 0 0;
-    font-size: 15px; }
-  footer { margin-top: 46px; padding-top: 18px; border-top: 1px solid var(--rule);
-    font-family: var(--mono); font-size: 11px; letter-spacing: .06em; color: var(--faint); }
-  footer a { color: var(--faint); }
+  .zone.tee code { background: color-mix(in srgb, var(--ink2) 25%, var(--deep)); color: color-mix(in srgb, var(--ink2) 70%, #fff); }
+  .spi { font: 500 12.5px/1.6 var(--mono); color: var(--faint); margin-top: 8px; }
+  .spi span { color: var(--i2-text); }
+  .prop { border-left: 4px solid var(--ink1); padding: 4px 0 4px 14px; margin: 14px 0 0; font-size: 15px; }
+  .prop b { font-weight: 700; }
 </style>
 </head>
 <body>
   <header class="top">
-    <span class="brand"><img src="icon.png" alt="" width="22" height="22" style="vertical-align:-5px;margin-right:7px">oauth3</span>
-    <a href="index.html">← back</a>
+    <span class="wordmark"><img src="icon.png" alt="">oauth<b>3</b></span>
+    <a class="signin" href="index.html">← back</a>
   </header>
 
   <main class="wrap">
-    <h1>The browser container</h1>
+    <h1 class="lede-h1">The browser container</h1>
     <p class="lede">How &ldquo;login&nbsp;with&nbsp;everything&rdquo; reads a site for you without ever handing the app your credential.</p>
 
-    <h2>the shape</h2>
-    <div class="diagram">
-      <div class="zone">
-        <div class="ztag">you</div>
-        <div class="zname">Sign in — once</div>
-        <p>You log into the site in a browser that runs <em>inside</em> the enclave. The session cookie is captured there.</p>
+    <section class="block">
+      <h2 class="k">the shape</h2>
+      <div class="diagram">
+        <div class="zone">
+          <div class="ztag">you</div>
+          <div class="zname">Sign in — once</div>
+          <p>You log into the site in a browser that runs <em>inside</em> the enclave. The session cookie is captured there.</p>
+        </div>
+        <div class="arrow">→<small>cookie in</small></div>
+        <div class="zone tee">
+          <div class="ztag">sealed TEE pod</div>
+          <div class="zname">Browser container</div>
+          <p>A real logged-in browser + an egress-locked proxy, held in a room the operator can&rsquo;t see into.</p>
+          <div class="box"><span class="lock">🔒 cookie</span> — never leaves</div>
+        </div>
+        <div class="arrow">→<small>scoped read</small></div>
+        <div class="zone">
+          <div class="ztag">app / agent</div>
+          <div class="zname">Gets the answer</div>
+          <p>Asks with a scoped token, receives just the requested data — your timeline, your history — not the credential.</p>
+        </div>
       </div>
-      <div class="arrow">→<small>cookie in</small></div>
-      <div class="zone tee">
-        <div class="ztag">sealed TEE pod</div>
-        <div class="zname">Browser container</div>
-        <p>A real logged-in browser + an egress-locked proxy, held in a room the operator can&rsquo;t see into.</p>
-        <div class="box"><span class="lock">🔒 cookie</span> — never leaves</div>
-      </div>
-      <div class="arrow">→<small>scoped read</small></div>
-      <div class="zone">
-        <div class="ztag">app / agent</div>
-        <div class="zname">Gets the answer</div>
-        <p>Asks with a scoped token, receives just the requested data — your timeline, your history — not the credential.</p>
-      </div>
-    </div>
+    </section>
 
-    <h2>step by step</h2>
-    <ol class="steps">
-      <li><b>Teleport your session in.</b> <span class="k">You sign into the site (X, Reddit, YouTube&hellip;) in the enclave&rsquo;s browser — the extension can hand off an existing session. The cookie is now sealed in the pod.</span></li>
-      <li><b>It stays put.</b> <span class="k">The browser reaches the site through an egress-locked proxy bound to that one domain. The credential can&rsquo;t be exfiltrated and can&rsquo;t be pointed elsewhere.</span></li>
-      <li><b>An app asks for a read.</b> <span class="k">It presents a scoped token (granted through your oauth3 dashboard) — <em>&ldquo;read my X timeline, nothing else.&rdquo;</em> It never sees the cookie.</span></li>
-      <li><b>The container does the read.</b> <span class="k">It navigates, renders, and returns only what was asked — a screenshot, the DOM, or a parsed result.</span>
-        <div class="spi">SPI: <span>/session</span> · <span>/navigate</span> · <span>/screenshot</span> · <span>/eval</span></div></li>
-      <li><b>Anyone can check the code.</b> <span class="k">The container is attested — its exact published build is measured, so a user (or the app) can verify it does only this before trusting it.</span></li>
-    </ol>
+    <section class="block">
+      <h2 class="k">step by step</h2>
+      <ol class="steps">
+        <li><b>Teleport your session in.</b> <span class="k">You sign into the site (X, Reddit, YouTube&hellip;) in the enclave&rsquo;s browser — the extension can hand off an existing session. The cookie is now sealed in the pod.</span></li>
+        <li><b>It stays put.</b> <span class="k">The browser reaches the site through an egress-locked proxy bound to that one domain. The credential can&rsquo;t be exfiltrated and can&rsquo;t be pointed elsewhere.</span></li>
+        <li><b>An app asks for a read.</b> <span class="k">It presents a scoped token (granted through your oauth3 dashboard) — <em>&ldquo;read my X timeline, nothing else.&rdquo;</em> It never sees the cookie.</span></li>
+        <li><b>The container does the read.</b> <span class="k">It navigates, renders, and returns only what was asked — a screenshot, the DOM, or a parsed result.</span>
+          <div class="spi">SPI: <span>/session</span> · <span>/navigate</span> · <span>/screenshot</span> · <span>/eval</span></div></li>
+        <li><b>Anyone can check the code.</b> <span class="k">The container is attested — its exact published build is measured, so a user (or the app) can verify it does only this before trusting it.</span></li>
+      </ol>
+    </section>
 
     <p class="prop"><b>The property:</b> the app gets the <em>read</em>, the enclave keeps the <em>credential</em>. One login, inside the sealed room, powers every scoped read after it — and the code doing it is verifiable, not trusted.</p>
 
-    <footer>oauth3 · <a href="index.html">home</a> · <a href="https://pod.dstack.soc1024.com/timeline-peek/">try the live browser-container demo →</a></footer>
+    <footer>
+      <div class="halftone"></div>
+      <p class="ftxt">oauth3 · <a href="index.html">home</a> · <a href="https://pod.dstack.soc1024.com/timeline-peek/">try the live browser-container demo →</a></p>
+    </footer>
   </main>
 </body>
 </html>
