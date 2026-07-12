@@ -189,21 +189,21 @@ login page omits the button. OpenKey is client-side SIWE, always available.
 
 ---
 
-## Journey → endpoint map
+## Smoke-check → endpoint map
 
-How the user journeys in [`USER-JOURNEYS.md`](../USER-JOURNEYS.md) map to this API. There is
+How the smoke checks in [`SMOKE-CHECKS.md`](../SMOKE-CHECKS.md) map to this API. There is
 **no automated test suite yet**; the verification evidence today is the live end-to-end runs
-recorded in `USER-JOURNEYS.md` (M1) plus `deno check server/main.ts`.
+recorded in `SMOKE-CHECKS.md` (M1) plus `deno check server/main.ts`.
 
-| journey | endpoints / surface |
+| smoke check | endpoints / surface |
 |---|---|
-| **J1** no-install cookie read | `POST /api/cookies` → `POST /api/tokens` → `GET /api/:plugin/items` (CLI: `cli sync/token/read`) |
-| **J2** extension ingest | `POST /api/cookies` (extension auto-syncs on cookie-change + 30m) |
-| **J3** connect & grant | `POST /api/connect` → `GET /approve/:id` (user) / `POST /api/connect/:id/approve` → `GET /api/connect/:id` (poll) → `GET /api/:plugin/items` (token) → `DELETE /api/tokens/:token` |
-| **J4** app delivers value | same as J3; the app holds only the `tok-…` |
-| **J5** browser capture | `GET /api/:plugin/screenshot` (Browser SPI; worker unbuilt — M2) |
-| **J6** add a site | the [`Plugin` interface](./plugins.md) + `registry.ts` (no endpoint) |
-| **J7** app gets listed | not built (#6) |
+| **S1** no-install cookie read | `POST /api/cookies` → `POST /api/tokens` → `GET /api/:plugin/items` (CLI: `cli sync/token/read`) |
+| **S2** extension ingest | `POST /api/cookies` (extension auto-syncs on cookie-change + 30m) |
+| **S3** connect & grant | `POST /api/connect` → `GET /approve/:id` (user) / `POST /api/connect/:id/approve` → `GET /api/connect/:id` (poll) → `GET /api/:plugin/items` (token) → `DELETE /api/tokens/:token` |
+| **S4** app delivers value | same as S3; the app holds only the `tok-…` |
+| **S5** browser capture | `GET /api/:plugin/screenshot` (Browser SPI; worker unbuilt — M2) |
+| **S6** add a site | the [`Plugin` interface](./plugins.md) + `registry.ts` (no endpoint) |
+| **S7** app gets listed | not built (#6) |
 
 ## CORS & headers
 
