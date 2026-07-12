@@ -24,7 +24,7 @@
 
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
 import { configureEgress, egressFetch, egressProxy } from "./egress.ts";
-import { deleteJar, getJar, initVault, jarStatus, setJar } from "./vault.ts";
+import { AmbiguousAccountError, deleteJar, getJar, initVault, jarsFor, setJar } from "./vault.ts";
 import { initTokens, listTokens, mint, revoke, type Token, verify, verifyCap } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit } from "./audit.ts";
@@ -45,7 +45,7 @@ import { consumeState, enabledProviders, githubAuthUrl, githubEnv, githubExchang
 import { configureOtter } from "./plugins/otter.ts";
 import { configureReddit } from "./plugins/reddit.ts";
 import { amazonPlugin, configureAmazon } from "./plugins/amazon.ts";
-import type { SubstituteOp } from "./plugins/types.ts";
+import type { Jar, SubstituteOp } from "./plugins/types.ts";
 import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.ts";
 import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot, browserFeed } from "./browser.ts";
@@ -64,7 +64,22 @@ export interface HandlerCtx { env: Record<string, string>; dataDir?: string; }
 
 async function init(env: Record<string, string>, dataDir: string) {
   if (ready) return;
-  await initVault(dataDir, env.SEAL_KEY || env.OAUTH3_SEAL_KEY || "");
+  await initVault(dataDir, env.SEAL_KEY || env.OAUTH3_SEAL_KEY || "", (pid, jar) => {
+    // #111: derive the account label the SAME way sync does. A plugin with an accountId hook
+    // (twitter) keys per account; every other plugin keys under "default". This callback runs
+    // only for MIGRATION of legacy 2-part keys — a best-effort recovery, so a legacy jar that
+    // can't yield an id (e.g. a pre-twid twitter session) falls back to "default" with a
+    // warning rather than bricking startup. The LIVE sync path (POST /api/cookies) stays
+    // strict — it calls plugin.accountId directly and propagates the error.
+    const p = getPlugin(pid);
+    if (!p?.accountId) return "default";
+    try {
+      return p.accountId(jar);
+    } catch (e) {
+      console.warn(`[vault] migration: ${pid} jar underivable account (${(e as Error).message}) → "default"`);
+      return "default";
+    }
+  });
   await initTokens(dataDir);
   await initConnect(dataDir);
   await initStepup(dataDir);
@@ -104,6 +119,27 @@ function landingHtml(session: string | null, returnUrl: string, note: string): s
   return `<!doctype html><meta charset=utf-8><body style="font:15px system-ui;max-width:30rem;margin:3rem auto;color:#111"><p>${note} Redirecting…</p><script>${set}location.href=${JSON.stringify(returnUrl)};</script>`;
 }
 const isOwner = (req: Request) => !!ownerSecret && req.headers.get("Authorization") === `Bearer ${ownerSecret}`;
+
+// #111: resolve a read jar, turning AmbiguousAccountError (a subject holding several
+// accounts for this plugin, none named) into a 409 carrying the available accounts so the
+// client can re-ask with ?account= or a token bound to one. Every token/owner read
+// chokepoint routes through here so ambiguity is surfaced, never silently resolved.
+type JarResolve = { ok: true; jar: Jar } | { ok: false; resp: Response };
+function readJar(subj: string, pluginId: string, account?: string): JarResolve {
+  try {
+    const jar = getJar(subj, pluginId, account);
+    if (!jar) return { ok: false, resp: json({ error: `no jar synced for ${pluginId}` }, 409) };
+    return { ok: true, jar };
+  } catch (e) {
+    if (e instanceof AmbiguousAccountError) {
+      return {
+        ok: false,
+        resp: json({ error: `multiple accounts synced for ${pluginId}; pass ?account=<id> or bind the token to one`, accounts: e.accounts }, 409),
+      };
+    }
+    throw e;
+  }
+}
 
 async function sha256hex(s: string): Promise<string> {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
@@ -401,7 +437,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return json({
       plugins: allPlugins().map((p) => ({
         id: p.id, label: p.label, cookieDomains: p.cookieDomains, account: !!p.account,
-        jar: subj ? jarStatus(subj, p.id) : { present: false, updatedAt: 0, count: 0 },
+        // #111: one identity may hold several accounts per plugin — surface them all.
+        jars: subj ? jarsFor(subj, p.id) : [],
       })),
     });
   }
@@ -418,9 +455,17 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const plugin = getPlugin(body?.plugin);
     if (!plugin) return json({ error: "unknown plugin" }, 404);
     if (!body?.cookies || typeof body.cookies !== "object") return json({ error: "missing cookies" }, 400);
-    await setJar(subj, plugin.id, body.cookies);
-    await audit("cookies.sync", { subject: subj, plugin: plugin.id, count: Object.keys(body.cookies).length });
-    return json({ ok: true, plugin: plugin.id, count: Object.keys(body.cookies).length });
+    // #111: derive the account from the jar so a second account for the same plugin creates
+    // a second jar instead of overwriting. A plugin without accountId keys under "default".
+    let account: string;
+    try {
+      account = plugin.accountId ? plugin.accountId(body.cookies) : "default";
+    } catch (e) {
+      return json({ error: `cannot derive account: ${(e as Error).message}` }, 400);
+    }
+    await setJar(subj, plugin.id, account, body.cookies);
+    await audit("cookies.sync", { subject: subj, plugin: plugin.id, account, count: Object.keys(body.cookies).length });
+    return json({ ok: true, plugin: plugin.id, account, count: Object.keys(body.cookies).length });
   }
 
   // Wipe a jar — your own by default; owner may target any subject via ?subject=.
@@ -429,8 +474,18 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const subj = subjectOf();
     if (!subj) return json({ error: "unauthorized" }, 401);
     const target = (isOwner(req) && url.searchParams.get("subject")) || subj;
-    const ok = await deleteJar(target, delc[1]);
-    await audit("cookies.delete", { subject: target, plugin: delc[1], found: ok });
+    // #111: ?account= targets one account; omitted applies the single/ambiguous rule.
+    const account = url.searchParams.get("account") || undefined;
+    let ok: boolean;
+    try {
+      ok = await deleteJar(target, delc[1], account);
+    } catch (e) {
+      if (e instanceof AmbiguousAccountError) {
+        return json({ error: `multiple accounts synced for ${delc[1]}; pass ?account=<id>`, accounts: e.accounts }, 409);
+      }
+      throw e;
+    }
+    await audit("cookies.delete", { subject: target, plugin: delc[1], account, found: ok });
     return json({ ok, deleted: ok });
   }
 
@@ -444,9 +499,18 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     // for another subject's jar by passing `subject` — e.g. to issue an app a read token for a
     // signed-in user's synced jar without impersonating them.
     const subj = (acting === "owner" && body?.subject) ? String(body.subject) : acting;
-    const t = await mint(body.plugin, subj, body.app, Array.isArray(body?.caps) ? body.caps : undefined);
-    await audit("token.mint", { plugin: t.plugin, subject: t.subject, app: t.app, caps: t.caps });
-    return json({ token: t.token, plugin: t.plugin, subject: t.subject, caps: t.caps ?? null });
+    // #111: optionally bind the token to ONE account's jar. Validate it names an existing
+    // jar for this subject+plugin now (reject unknown up front, not on first read).
+    const account = body?.account !== undefined && body?.account !== null ? String(body.account) : undefined;
+    if (account !== undefined) {
+      const known = jarsFor(subj, body.plugin).map((j) => j.account);
+      if (!known.includes(account)) {
+        return json({ error: `unknown account '${account}' for ${body.plugin}`, accounts: known }, 400);
+      }
+    }
+    const t = await mint(body.plugin, subj, body.app, Array.isArray(body?.caps) ? body.caps : undefined, account);
+    await audit("token.mint", { plugin: t.plugin, subject: t.subject, app: t.app, caps: t.caps, account });
+    return json({ token: t.token, plugin: t.plugin, subject: t.subject, caps: t.caps ?? null, account: account ?? null });
   }
   if (req.method === "GET" && path === "/api/tokens") {
     const subj = subjectOf();
@@ -532,7 +596,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     // token only carries them after the owner approves. scope/attestation feed the RFC 0007
     // routing decision (friction) cached on the request for the approve page to render.
     const caps = Array.isArray(body?.caps) ? body.caps.filter((c: unknown) => typeof c === "string") : undefined;
-    const r = await createConnect(body.plugin, body.subject, body.app, caps, body.scope, body.attestation);
+    const r = await createConnect(body.plugin, body.subject, body.app, caps, body.scope, body.attestation, body?.account !== undefined ? String(body.account) : undefined);
     await audit("connect.request", { plugin: r.plugin, app: r.app, caps: r.caps, requestId: r.requestId, scope: r.scope, friction: r.routeResult?.friction });
     // RFC 0007 §4.1: log eval entry at request time
     await logEval({
@@ -558,6 +622,22 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       const body = await req.json().catch(() => null) as any;
       const approver = subjectOf() ?? (!!ownerSecret && body?.owner_secret === ownerSecret ? "owner" : null);
       if (!approver) return json({ error: "sign in to approve" }, 401);
+      // #111: at approve time the approver's jars are known — validate a named account, or
+      // 409 with the account list when several exist and the request named none. The picker
+      // UI is an oauth3-extension follow-up; the API contract lands here.
+      if (action === "approve") {
+        const pending = getConnect(id);
+        if (pending) {
+          const held = jarsFor(approver, pending.plugin).map((j) => j.account);
+          if (pending.account !== undefined) {
+            if (!held.includes(pending.account)) {
+              return json({ error: `unknown account '${pending.account}' for ${pending.plugin}`, accounts: held }, 400);
+            }
+          } else if (held.length > 1) {
+            return json({ error: `multiple accounts synced for ${pending.plugin}; the connect request must name one (account)`, accounts: held }, 409);
+          }
+        }
+      }
       const r = action === "approve" ? await approveConnect(id, approver) : await denyConnect(id);
       if (!r) return json({ error: "unknown or already-decided request" }, 404);
       await audit(`connect.${action}`, { subject: approver, plugin: r.plugin, app: r.app, requestId: id });
@@ -606,8 +686,9 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   // browser + /capture-trace, the reification instrument). See twitter-actions.ts. ---
   if (path.startsWith("/api/twitter/debug/")) {
     if (!isOwner(req)) return json({ error: "owner only" }, 401);
-    const jar = getJar("owner", "twitter");
-    if (!jar) return json({ error: "no twitter jar synced" }, 409);
+    const twAcct = url.searchParams.get("account") || undefined;
+    const rj = readJar("owner", "twitter", twAcct); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     const op = path.slice("/api/twitter/debug/".length);
     const body = req.method === "POST" ? (await req.json().catch(() => ({})) as any) : {};
     const way = url.searchParams.get("path") || body.path || "api";
@@ -689,8 +770,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "screenshot", bearer); if (denied) return denied;
     const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     const target = url.searchParams.get("url") || plugin.renderUrl ||
       `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
@@ -718,8 +799,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verifyCap(bearer, plugin.id, "jar");
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     await audit("jar.release", { plugin: plugin.id, subject: subj, count: Object.keys(jar).length, by: t ? (t.app || t.subject || "token") : "owner" });
     return json({ plugin: plugin.id, subject: subj, jar });
   }
@@ -736,8 +817,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "feed", bearer); if (denied) return denied;
     const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     const target = url.searchParams.get("url") || plugin.renderUrl ||
       `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
@@ -755,8 +836,9 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   if (req.method === "GET" && path === "/api/youtube/debug") {
     if (!isOwner(req)) return json({ error: "owner only" }, 401);
     const subj = url.searchParams.get("subject") || "owner";
-    const jar = getJar(subj, "youtube");
-    if (!jar) return json({ error: `no jar for ${subj}` }, 409);
+    const ytAcct = url.searchParams.get("account") || undefined;
+    const rj = readJar(subj, "youtube", ytAcct); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     const crit = ["SID", "HSID", "SSID", "APISID", "SAPISID", "__Secure-1PSID", "__Secure-3PSID", "__Secure-1PAPISID", "__Secure-3PAPISID", "LOGIN_INFO"];
     const critical = Object.fromEntries(crit.map((c) => [c, c in jar ? (jar[c]?.length ?? 0) : null]));
     // ?egress=1 routes the probe fetch through the shared VPN (so we can A/B the SAME jar
@@ -794,8 +876,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "live", bearer); if (denied) return denied;
     const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     try {
       const data = await plugin.live(jar, Number(url.searchParams.get("after") || "0") || 0);
@@ -819,8 +901,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "frame", bearer); if (denied) return denied;
     const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     let target: string;
     try { target = atob((url.searchParams.get("u") || "").replace(/-/g, "+").replace(/_/g, "/")); }
@@ -845,8 +927,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const denied = await gateRead(t, plugin.id, "items", bearer); if (denied) return denied;
     // A scoped token reads its own subject's jar; the owner secret reads owner's.
     const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
 
     // Step-up gate now lives in gateRead at the read chokepoint (RFC 0005); first-use is
@@ -894,8 +976,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "account", bearer); if (denied) return denied;
     const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     try {
       const data = await plugin.account(jar);
@@ -929,8 +1011,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const subj = t ? (t.subject ?? "owner") : "owner";
     const by = t ? (t.app || t.subject || "token") : "owner";
     const body = await req.json().catch(() => null) as { changes?: unknown } | null;
-    const jar = getJar(subj, "google-calendar");
-    if (!jar) return json({ error: "no jar synced for google-calendar" }, 409);
+    const rj = readJar(subj, "google-calendar", t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     await audit("google-calendar.event.edit", { eventId, subject: subj, by });
     if (!plugin.editItem) return json({ error: "plugin does not expose writes" }, 501);
@@ -964,8 +1046,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const subj = t ? (t.subject ?? "owner") : "owner";
     const by = t ? (t.app || t.subject || "token") : "owner";
     const body = await req.json().catch(() => null) as Partial<SubstituteOp> | null;
-    const jar = getJar(subj, "amazon");
-    if (!jar) return json({ error: "no jar synced for amazon" }, 409);
+    const rj = readJar(subj, "amazon", t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!amazonPlugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     await audit("amazon.cart.substitute", { subject: subj, by, op: body });
     if (!amazonPlugin.substitute) return json({ error: "plugin does not expose cart writes" }, 501);

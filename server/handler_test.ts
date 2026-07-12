@@ -215,7 +215,7 @@ Deno.test("handler: GET /api/:plugin/items returns list under `items` AND `data`
   plugin.loggedIn = () => true;
   plugin.listItems = () => Promise.resolve(fakeItems);
   try {
-    await setJar("owner", "otter", { session: "x" });
+    await setJar("owner", "otter", "default", { session: "x" });
     const { status, json } = await ownerReq("GET", "/api/otter/items");
     assertEquals(status, 200);
     const body = json as Record<string, unknown>;
@@ -241,7 +241,7 @@ Deno.test("handler: GET /api/:plugin/items/:id returns single item under `data` 
   plugin.loggedIn = () => true;
   plugin.fetchItem = () => Promise.resolve(one);
   try {
-    await setJar("owner", "otter", { session: "x" });
+    await setJar("owner", "otter", "default", { session: "x" });
     const { status, json } = await ownerReq("GET", "/api/otter/items/a");
     assertEquals(status, 200);
     const body = json as Record<string, unknown>;

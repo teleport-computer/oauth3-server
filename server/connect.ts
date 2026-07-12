@@ -18,6 +18,9 @@ export interface ConnectReq {
   scope?: string;
   // RFC 0007 §1.1: verifiability claim (URL of td-0020 evidence bundle)
   attestation?: string;
+  // #111: bind the minted token to ONE account's jar when the approver holds several for
+  // this plugin. Resolved/validated at approve time (the approver's jars are what's read).
+  account?: string;
   status: "pending" | "approved" | "denied";
   token?: string;
   createdAt: number;
@@ -49,6 +52,7 @@ export async function createConnect(
   caps?: string[],
   scope?: string,
   attestation?: string,
+  account?: string,
 ): Promise<ConnectReq> {
   const requestId = `req-${crypto.randomUUID().replace(/-/g, "")}`;
   const routeResult = route(plugin, scope, attestation);
@@ -63,6 +67,7 @@ export async function createConnect(
     status: "pending",
     createdAt: Date.now(),
     routeResult,
+    ...(account ? { account } : {}),
   };
   await persist();
   return reqs[requestId];
@@ -77,7 +82,8 @@ export async function approveConnect(id: string, approver: string): Promise<Conn
   if (!r || r.status !== "pending") return null;
   // The minted token carries the requested caps (e.g. write:event:<id>) only after the
   // approver sees them on the consent screen — informed consent for a write capability.
-  const t = await mint(r.plugin, approver, r.app, r.caps);
+  // #111: it also carries the requested account, binding the read to that account's jar.
+  const t = await mint(r.plugin, approver, r.app, r.caps, r.account);
   // RFC 0005 step-up: an owner-approved connect IS the out-of-band consent. Pre-mark the
   // freshly minted token as used so its first read does not trip step-up again (the owner
   // just granted it on the approve screen). oauth3-server#106 acceptance bullet 2.

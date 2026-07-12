@@ -457,7 +457,7 @@ const STUB_RESULT = {
 };
 
 Deno.test("amazon substitute handler: owner substitute → 200 (stubbed write)", async () => {
-  await setJar("owner", "amazon", { "at-main": "x" });
+  await setJar("owner", "amazon", "default", { "at-main": "x" });
   const orig = amazonPlugin.substitute;
   amazonPlugin.substitute = () => Promise.resolve(STUB_RESULT);
   try {
@@ -473,7 +473,7 @@ Deno.test("amazon substitute handler: owner substitute → 200 (stubbed write)",
 });
 
 Deno.test("amazon substitute handler: cart-substitute token → 200 (stubbed write)", async () => {
-  await setJar("friend", "amazon", { "at-main": "x" });
+  await setJar("friend", "amazon", "default", { "at-main": "x" });
   const tok = await mint("amazon", "friend", "cart-share-friend", ["amazon:cart-substitute"]);
   const orig = amazonPlugin.substitute;
   amazonPlugin.substitute = () => Promise.resolve(STUB_RESULT);
@@ -486,7 +486,7 @@ Deno.test("amazon substitute handler: cart-substitute token → 200 (stubbed wri
 });
 
 Deno.test("amazon substitute handler: read-only (no-cap) token → 401", async () => {
-  await setJar("friend", "amazon", { "at-main": "x" });
+  await setJar("friend", "amazon", "default", { "at-main": "x" });
   const readOnly = await mint("amazon", "friend", "reader"); // no caps
   const res = await postSub(readOnly.token, { removeAsin: "B08N5WRWNW", addAsin: "B07VGRJDFY", qty: 1 });
   assertEquals(res.status, 401);
@@ -495,7 +495,7 @@ Deno.test("amazon substitute handler: read-only (no-cap) token → 401", async (
 });
 
 Deno.test("amazon substitute handler: token with an unrelated cap → 401", async () => {
-  await setJar("friend", "amazon", { "at-main": "x" });
+  await setJar("friend", "amazon", "default", { "at-main": "x" });
   const other = await mint("amazon", "friend", "jarapp", ["jar"]); // a different cap
   const res = await postSub(other.token, { removeAsin: "B08N5WRWNW", addAsin: "B07VGRJDFY", qty: 1 });
   assertEquals(res.status, 401);
@@ -504,7 +504,7 @@ Deno.test("amazon substitute handler: token with an unrelated cap → 401", asyn
 Deno.test("amazon substitute handler: arbitrary add (no removeAsin) → 403 via the real gate", async () => {
   // substitute is NOT stubbed: normalizeSubstitute runs first and throws SubstituteDeniedError
   // BEFORE any fetch, so this proves the shape gate end-to-end through the real handler.
-  await setJar("friend", "amazon", { "at-main": "x" });
+  await setJar("friend", "amazon", "default", { "at-main": "x" });
   const tok = await mint("amazon", "friend", "cart-share-friend", ["amazon:cart-substitute"]);
   const res = await postSub(tok.token, { addAsin: "B07VGRJDFY", qty: 1 });
   assertEquals(res.status, 403);
@@ -513,7 +513,7 @@ Deno.test("amazon substitute handler: arbitrary add (no removeAsin) → 403 via 
 });
 
 Deno.test("amazon substitute handler: quantity-bomb → 403 via the real gate", async () => {
-  await setJar("friend", "amazon", { "at-main": "x" });
+  await setJar("friend", "amazon", "default", { "at-main": "x" });
   const tok = await mint("amazon", "friend", "cart-share-friend", ["amazon:cart-substitute"]);
   const res = await postSub(tok.token, { removeAsin: "B08N5WRWNW", addAsin: "B07VGRJDFY", qty: 50 });
   assertEquals(res.status, 403);
@@ -522,7 +522,7 @@ Deno.test("amazon substitute handler: quantity-bomb → 403 via the real gate", 
 });
 
 Deno.test("amazon substitute handler: a scoped denial from the write → 403", async () => {
-  await setJar("friend", "amazon", { "at-main": "x" });
+  await setJar("friend", "amazon", "default", { "at-main": "x" });
   const tok = await mint("amazon", "friend", "cart-share-friend", ["amazon:cart-substitute"]);
   const orig = amazonPlugin.substitute;
   amazonPlugin.substitute = () => Promise.reject(new SubstituteDeniedError("outside the substitute price band"));
@@ -537,7 +537,7 @@ Deno.test("amazon substitute handler: a scoped denial from the write → 403", a
 });
 
 Deno.test("amazon substitute handler: a transport error from the write → 502", async () => {
-  await setJar("friend", "amazon", { "at-main": "x" });
+  await setJar("friend", "amazon", "default", { "at-main": "x" });
   const tok = await mint("amazon", "friend", "cart-share-friend", ["amazon:cart-substitute"]);
   const orig = amazonPlugin.substitute;
   amazonPlugin.substitute = () => Promise.reject(new Error("amazon refused the cart-remove write — BROWSER-PATH"));
@@ -568,7 +568,7 @@ Deno.test("amazon substitute handler: no checkout endpoint exists for the cap (d
   // There is no checkout/address/payment surface; a cart-substitute token hitting this route
   // with a checkout-shaped body is rejected by the shape gate (no removeAsin = not a
   // substitute) → 403, never a write. Proves the cap cannot move money.
-  await setJar("friend", "amazon", { "at-main": "x" });
+  await setJar("friend", "amazon", "default", { "at-main": "x" });
   const tok = await mint("amazon", "friend", "cart-share-friend", ["amazon:cart-substitute"]);
   const res = await postSub(tok.token, { op: "checkout", asin: "B07VGRJDFY", qty: 1 });
   assertEquals(res.status, 403);
