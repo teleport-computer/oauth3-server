@@ -45,6 +45,14 @@ export const STATIC_LISTING: Listing[] = [
       "Lets a friend read your Amazon cart to suggest organic substitutions under a scoped, substitute-only capability — reads cart line items only, never checkout, address, payment, or order history.",
     discharge: 1,
   },
+  {
+    appId: "teleport-pod",
+    allowedPlugins: ["twitter"],
+    maxScope: "read",
+    statement:
+      "Post-once gift vouchers (Teleport, reborn as a pod app). Pulls your X jar to post on your behalf, but only when a holder redeems a scoped, single-use, LLM-filtered voucher you minted — one filtered post per voucher, revocable.",
+    discharge: 1,
+  },
 ];
 
 /**
