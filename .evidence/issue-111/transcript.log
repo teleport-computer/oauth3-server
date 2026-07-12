@@ -1,0 +1,66 @@
+### 0. Tier 1 version pin: GET /_api/version == this PR commit (146290600)
+{"service":"oauth3-server","commit":"146290600bd3e3eff38b53309454d653cca473c4"}
+### 1. BEFORE: owner has no twitter jar
+{"error":"no jar synced for twitter"}
+[HTTP 409]
+### 2. sync twitter acct 111 (twid=u%3D111) -> account derived from jar = '111'
+
+POST /api/cookies
+{"ok":true,"plugin":"twitter","account":"111","count":2}
+[HTTP 200]
+### 3. sync twitter acct 222 (twid=u%3D222) -> SECOND jar (no clobber)
+
+POST /api/cookies
+{"ok":true,"plugin":"twitter","account":"222","count":2}
+[HTTP 200]
+### 4. GET /api/plugins -> twitter 'jars' lists BOTH accounts
+{
+  "id": "twitter",
+  "jars": [
+    {
+      "account": "111",
+      "updatedAt": 1783863403025,
+      "count": 2
+    },
+    {
+      "account": "222",
+      "updatedAt": 1783863403372,
+      "count": 2
+    }
+  ]
+}
+### 5. ambiguous read (owner, no account) -> 409 + accounts (never guesses)
+
+GET /api/twitter/jar
+{"error":"multiple accounts synced for twitter; pass ?account=<id> or bind the token to one","accounts":["111","222"]}
+[HTTP 409]
+### 6. account-qualified read ?account=111 -> jar 111
+
+GET /api/twitter/jar?account=111
+{"plugin":"twitter","subject":"owner","jar":{"twid":"u%3D111","auth_token":"acct1-token"}}
+[HTTP 200]
+### 7. account-qualified read ?account=222 -> jar 222 (distinct)
+
+GET /api/twitter/jar?account=222
+{"plugin":"twitter","subject":"owner","jar":{"twid":"u%3D222","auth_token":"acct2-token"}}
+[HTTP 200]
+### 8. mint a token BOUND to account 222 (caps:jar)
+{"token":"tok-twitter-772a358bb29b40aebd90afa7","plugin":"twitter","subject":"owner","caps":["jar"],"account":"222"}
+### 9. read WITH that token (no ?account) -> resolves jar 222 via token.account
+{"plugin":"twitter","subject":"owner","jar":{"twid":"u%3D222","auth_token":"acct2-token"}}
+[HTTP 200]
+### 10. token bound to 222 does NOT read 111 even if ?account=111 asks (token wins)
+{"plugin":"twitter","subject":"owner","jar":{"twid":"u%3D222","auth_token":"acct2-token"}}
+[HTTP 200]
+### 11. cleanup: delete both test accounts
+
+DELETE /api/cookies/twitter?account=111
+{"ok":true,"deleted":true}
+[HTTP 200]
+
+DELETE /api/cookies/twitter?account=222
+{"ok":true,"deleted":true}
+[HTTP 200]
+### 12. AFTER cleanup: owner back to no twitter jar
+{"error":"no jar synced for twitter"}
+[HTTP 409]
