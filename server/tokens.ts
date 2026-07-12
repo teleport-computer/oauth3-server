@@ -9,6 +9,7 @@ export interface Token {
   subject?: string;
   app?: string;
   caps?: string[]; // extra capabilities beyond read (e.g. "jar" = raw-jar release, "write:event:<id>" = one-event edit)
+  account?: string; // #111: bind the token to ONE account's jar when a subject holds several for this plugin
   createdAt: number;
   revokedAt?: number;
 }
@@ -27,9 +28,9 @@ export async function initTokens(dir: string): Promise<void> {
   catch (e) { if (!(e instanceof Deno.errors.NotFound)) throw e; }
 }
 
-export async function mint(plugin: string, subject?: string, app?: string, caps?: string[]): Promise<Token> {
+export async function mint(plugin: string, subject?: string, app?: string, caps?: string[], account?: string): Promise<Token> {
   const token = `tok-${plugin}-${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
-  const t: Token = { token, plugin, subject, app, ...(caps?.length ? { caps } : {}), createdAt: Date.now() };
+  const t: Token = { token, plugin, subject, app, ...(caps?.length ? { caps } : {}), ...(account ? { account } : {}), createdAt: Date.now() };
   tokens[token] = t;
   await persist();
   return t;

@@ -23,10 +23,10 @@ export function startScheduler(env: Record<string, string>, dataDir: string): vo
 }
 
 async function syncAll(dataDir: string): Promise<void> {
-  for (const { subject, plugin: pid, jar } of allJars()) {
+  for (const { subject, plugin: pid, account, jar } of allJars()) {
     const p = getPlugin(pid);
     if (!p || !p.loggedIn(jar)) continue;
-    const dir = `${dataDir}/transcripts/${subject}/${pid}`;
+    const dir = `${dataDir}/transcripts/${subject}/${pid}/${account}`;
     await Deno.mkdir(dir, { recursive: true });
     const items = await p.listItems(jar);
     let added = 0;

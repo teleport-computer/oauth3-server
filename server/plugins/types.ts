@@ -58,6 +58,13 @@ export interface Plugin {
   cookieDomains: string[]; // extension grabs the WHOLE jar for these, e.g. [".otter.ai"]
   renderUrl?: string; // page to load for /screenshot; defaults to https://www.<cookieDomain>
   loggedIn(jar: Jar): boolean; // cheap presence check on a key cookie
+  // Synchronous, offline account-id derivation from the jar (#111): the vault keys a jar
+  // under `${subject}:${plugin}:${account}`, and `account` is DERIVED from the jar itself
+  // (e.g. twitter's twid cookie) so one identity can hold multiple accounts per plugin
+  // without a user-supplied label or a second oauth3 identity. MUST be deterministic +
+  // side-effect-free; throws if a logged-in session can't yield a stable id (do not guess).
+  // Distinct from the async `account?(jar)` stats read below (identity + karma, networked).
+  accountId?(jar: Jar): string;
   listItems(jar: Jar, opts?: PluginListOptions): Promise<PluginItem[]>;
   fetchItem(jar: Jar, id: string): Promise<unknown>;
   // Optional account-level read: identity + stats for the logged-in account (e.g. Reddit
