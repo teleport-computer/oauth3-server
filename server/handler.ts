@@ -183,30 +183,27 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   if (req.method === "GET" && path === "/terms") return html(termsPage(ctx.env));
   if (req.method === "GET" && path === "/evidence") return html(evidencePage(ctx.env));
 
-  // Smoke-check report — static HTML from disk if available.
-  // NOTE: route/path is still `/journeys` (+ `POST /api/journeys`, `data/journeys/`) because
-  // the paseo-batch cron uploads the generated report here; renaming it is a cross-system
-  // change that must land atomically with the paseo-batch writer (see #81). The persona docs
-  // were renamed to "smoke checks" (S1–S7) in SMOKE-CHECKS.md.
-  if (req.method === "GET" && (path === "/journeys" || path === "/journeys/")) {
-    const journeysPath = (ctx.dataDir || ".") + "/journeys/index.html";
+  // Smoke-check report — static HTML served from disk when an operator/cron has uploaded it.
+  // Renamed from /journeys in #81 (the suite is flow verification, not a user journey).
+  if (req.method === "GET" && (path === "/smoke" || path === "/smoke/")) {
+    const reportPath = (ctx.dataDir || ".") + "/smoke/index.html";
     try {
-      const journeysHtml = await Deno.readTextFile(journeysPath);
-      return html(journeysHtml);
+      const reportHtml = await Deno.readTextFile(reportPath);
+      return html(reportHtml);
     } catch {
-      return html("<html><body><h1>User Journeys Report</h1><p>Report not found at " + journeysPath + "</p></body></html>");
+      return html("<html><body><h1>Smoke-check report</h1><p>Report not found at " + reportPath + "</p></body></html>");
     }
   }
-  // Admin endpoint to update the journeys report (owner secret required).
-  if (req.method === "POST" && path === "/api/journeys") {
+  // Admin endpoint to update the smoke-check report (owner secret required).
+  if (req.method === "POST" && path === "/api/smoke") {
     if (!isOwner(req)) return json({ error: "unauthorized" }, 401);
-    const html = await req.text();
-    const journeysDir = (ctx.dataDir || ".") + "/journeys";
-    const journeysPath = journeysDir + "/index.html";
-    await Deno.mkdir(journeysDir, { recursive: true });
-    await Deno.writeTextFile(journeysPath, html);
-    await audit("journeys.update", {});
-    return json({ ok: true, path: journeysPath });
+    const body = await req.text();
+    const reportDir = (ctx.dataDir || ".") + "/smoke";
+    const reportPath = reportDir + "/index.html";
+    await Deno.mkdir(reportDir, { recursive: true });
+    await Deno.writeTextFile(reportPath, body);
+    await audit("smoke.update", {});
+    return json({ ok: true, path: reportPath });
   }
 
   // The instance's own demo app — open it with the extension, no sign-in.
