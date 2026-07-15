@@ -6,205 +6,95 @@
 <title>oauth3 — roadmap snapshot, 2026-06-25</title>
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="apple-touch-icon" href="icon.png">
+<link rel="stylesheet" href="watermelon.css">
 <style>
-/* ===== tokens.css (watermelon classic) — inlined ===== */
-/* oauth3 / pod.dstack — design tokens
-   system: CONSTRUCTIVIST OVERPRINT — Rodchenko geometry printed as a two-ink riso.
-   primary inking: "watermelon classic"  ink1 #00838a (teal) · ink2 #ff48b0 (fluoro pink)
-   Re-ink an app by overriding --ink1/--ink2/--deep (+ dark variants); everything else derives. */
+  .hero { padding: 6vh 0 0; }
+  .hero .kicker { color: var(--ink2); display: block; margin-bottom: 14px; }
+  .standfirst { font-size: clamp(18px, 2.4vw, 21px); line-height: 1.45; margin: 20px 0 0; max-width: 32em; color: var(--text); font-weight: 400; }
+  .meta { font: 500 12px/1.6 var(--mono); color: var(--faint); margin-top: 18px; letter-spacing: .02em; }
+  h3 { font-size: 20px; }
+  .lead { font-size: 18.5px; }
+  .inline { border-bottom: 1px solid var(--ink2); text-decoration: none; }
+  figure { margin: 18px 0 6px; }
+  figcaption { font: 500 11.5px/1.5 var(--mono); color: var(--faint); margin-top: 10px; letter-spacing: .02em; }
+  code { font-size: .82em; }
 
-:root {
-  --ink1: #00838a;   /* teal — structure, primary actions, ok-status */
-  --ink2: #ff48b0;   /* fluoro pink — emphasis, danger, stamps, wedges */
-  --paper: #f8f7f3;
-  --deep: #123f43;        /* ink1 pulled toward black: body text + dark blocks */
-  --overprint: #00255f;   /* ink1 × ink2 multiply — free third color, decorative only */
+  /* the dial — hard-edged attenuation bar, teal → paper → pink */
+  .dial { height: 54px; border: 2px solid var(--ink1); background: linear-gradient(90deg, var(--wash1) 0%, var(--paper) 55%, var(--wash2) 100%);
+    position: relative; display: flex; align-items: center; }
+  .dial .end { font: 500 11px var(--mono); text-transform: lowercase; letter-spacing: .08em; padding: 0 16px; color: var(--i1-text); }
+  .dial .end.r { margin-left: auto; color: var(--i2-text); }
+  .dial .pip { position: absolute; left: 22%; top: -7px; bottom: -7px; width: 3px; background: var(--deep); }
 
-  --bg: var(--paper);
-  --text: var(--deep);
-  --faint: color-mix(in srgb, var(--deep) 55%, var(--paper));
-  --rule: color-mix(in srgb, var(--deep) 16%, var(--paper));
-  --card: #fff;
-  --block: var(--deep);       /* evidence blocks (receipts, logs) */
-  --block-text: #f8f7f3;
-  --wash1: color-mix(in srgb, var(--ink1) 15%, var(--paper));
-  --wash2: color-mix(in srgb, var(--ink2) 17%, var(--paper));
-  --i1-text: #00676d;   /* inks deepened for small text on washes */
-  --i2-text: #c2187a;
-  --warn: #a8780c;      /* marigold — the ONLY third ink, stale/warn states only */
-  --warn-wash: color-mix(in srgb, #e0a41a 22%, var(--paper));
+  /* matrix */
+  .grid2 { display: grid; grid-template-columns: 150px 1fr 1fr; gap: 8px; align-items: stretch; }
+  .grid2 .cell { padding: 12px 14px; border: 1px solid var(--rule); background: var(--card); font-size: 14.5px; }
+  .grid2 .cell.easy { background: var(--wash1); }
+  .grid2 .cell.hard { background: var(--wash2); }
+  .grid2 .axis { background: transparent; border: none; font: 500 11px/1.3 var(--mono); text-transform: lowercase;
+    letter-spacing: .05em; color: var(--faint); display: flex; align-items: center; }
+  .grid2 .hd { font: 500 11px/1 var(--mono); letter-spacing: .05em; text-transform: lowercase; color: var(--faint); background: transparent; border: none; text-align: center; }
+  .cell .tag { font: 500 10.5px/1 var(--mono); text-transform: lowercase; letter-spacing: .1em; display: block; margin-bottom: 5px; }
+  .easy .tag { color: var(--i1-text); } .mid .tag { color: var(--faint); } .hard .tag { color: var(--i2-text); }
+  @media (max-width: 620px) { .grid2 { grid-template-columns: 1fr; } .grid2 .axis, .grid2 .hd { display: none; } }
 
-  --sans: "Helvetica Neue", Arial, sans-serif;                /* UI body */
-  --cond: "Arial Narrow", "Helvetica Neue", sans-serif;       /* display: 800 uppercase */
-  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;     /* anything verifiable */
+  /* loops */
+  .loops { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 700px) { .loops { grid-template-columns: 1fr; } }
+  .loop { border: 1px solid var(--rule); border-left: 4px solid var(--ink1); background: var(--card); padding: 16px; font-size: 14px; }
+  .loop h4 { margin: 0 0 10px; font: 800 14px var(--cond); text-transform: uppercase; letter-spacing: .04em; color: var(--text); }
+  .loop .row { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+  .loop .cheap, .loop .dear { padding: 5px 8px; font: 500 11px/1.3 var(--mono); flex: 1; }
+  .loop .cheap { background: var(--wash1); color: var(--i1-text); }
+  .loop .dear { background: var(--wash2); color: var(--i2-text); }
+  .loop .arr { font: 500 11px var(--mono); color: var(--faint); white-space: nowrap; }
+  .loop .res { font: 500 10.5px/1.5 var(--mono); color: var(--faint); margin-top: 7px; }
+  .loop .res b { color: var(--text); font-weight: 700; }
 
-  --off: 1px;   /* misregistration offset — NEVER larger, display text ≥19px only */
-}
+  /* two-layer stack */
+  .stack { display: flex; flex-direction: column; gap: 10px; }
+  .band { border: 1px solid var(--rule); padding: 14px 16px; }
+  .band.app { background: var(--wash1); }
+  .band.plat { background: var(--card); }
+  .band .lbl { font: 500 11px/1 var(--mono); text-transform: lowercase; letter-spacing: .08em; color: var(--faint); margin-bottom: 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .chip { font: 500 12px var(--mono); padding: 5px 10px; border: 1px solid var(--rule); background: var(--paper);
+    white-space: nowrap; text-decoration: none; color: var(--text); transition: border-color .12s, background .12s; }
+  .chip b { color: var(--i2-text); font-weight: 700; }
+  a.chip:hover { border-color: var(--ink2); background: var(--wash2); }
+  .between { text-align: center; font: 500 11px var(--mono); color: var(--faint); letter-spacing: .04em; }
 
-/* dark register — same inks brightened on marine-black; multiply blends die on dark
-   grounds, so overlap devices use solid layering there (components handle it) */
-@media (prefers-color-scheme: dark) { :root {
-  --ink1: #2fbdc4; --ink2: #ff5fbb;
-  --paper: #0e1f21; --deep: #081517;
-  --bg: #0e1f21; --text: #e9f0ee;
-  --faint: color-mix(in srgb, #e9f0ee 55%, #0e1f21);
-  --rule: color-mix(in srgb, #e9f0ee 14%, #0e1f21);
-  --card: #142829; --block: #081517; --block-text: #e9f0ee;
-  --wash1: color-mix(in srgb, #2fbdc4 20%, #0e1f21);
-  --wash2: color-mix(in srgb, #ff5fbb 20%, #0e1f21);
-  --i1-text: #5fd3d9; --i2-text: #ff8ccb;
-  --warn: #e0b34a; --warn-wash: color-mix(in srgb, #e0a41a 18%, #0e1f21);
-} }
-:root[data-theme="dark"] {
-  --ink1: #2fbdc4; --ink2: #ff5fbb;
-  --paper: #0e1f21; --deep: #081517;
-  --bg: #0e1f21; --text: #e9f0ee;
-  --faint: color-mix(in srgb, #e9f0ee 55%, #0e1f21);
-  --rule: color-mix(in srgb, #e9f0ee 14%, #0e1f21);
-  --card: #142829; --block: #081517; --block-text: #e9f0ee;
-  --wash1: color-mix(in srgb, #2fbdc4 20%, #0e1f21);
-  --wash2: color-mix(in srgb, #ff5fbb 20%, #0e1f21);
-  --i1-text: #5fd3d9; --i2-text: #ff8ccb;
-  --warn: #e0b34a; --warn-wash: color-mix(in srgb, #e0a41a 18%, #0e1f21);
-}
-:root[data-theme="light"] {
-  --ink1: #00838a; --ink2: #ff48b0;
-  --paper: #f8f7f3; --deep: #123f43;
-  --bg: #f8f7f3; --text: #123f43;
-  --faint: color-mix(in srgb, #123f43 55%, #f8f7f3);
-  --rule: color-mix(in srgb, #123f43 16%, #f8f7f3);
-  --card: #fff; --block: #123f43; --block-text: #f8f7f3;
-  --wash1: color-mix(in srgb, #00838a 15%, #f8f7f3);
-  --wash2: color-mix(in srgb, #ff48b0 17%, #f8f7f3);
-  --i1-text: #00676d; --i2-text: #c2187a;
-  --warn: #a8780c; --warn-wash: color-mix(in srgb, #e0a41a 22%, #f8f7f3);
-}
+  /* flow steps */
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+  .flow .step { flex: 1; min-width: 150px; border: 1px solid var(--rule); border-left: 4px solid var(--ink1);
+    background: var(--card); padding: 12px 14px; font-size: 13.5px; }
+  .flow .step .s { font: 500 10px/1 var(--mono); text-transform: lowercase; letter-spacing: .1em; color: var(--i2-text); display: block; margin-bottom: 5px; }
 
-/* ===== components.css — inlined ===== */
-body { background: var(--bg); color: var(--text); font: 15px/1.6 var(--sans); }
-a { color: var(--i1-text); }
-:focus-visible { outline: 2px solid var(--ink2); outline-offset: 2px; }
-.display { font: 800 clamp(30px, 5.5vw, 54px)/0.94 var(--cond); text-transform: uppercase; margin: 0; color: var(--ink1); text-shadow: var(--off) var(--off) 0 var(--ink2); text-wrap: balance; }
-.label { font: 500 11px/1 var(--mono); letter-spacing: .16em; text-transform: lowercase; color: var(--faint); }
-
-/* ===== page (docs/roadmap) ===== */
-:root { --gutter: clamp(20px, 7vw, 130px); }
-* { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
-body { margin: 0; }
-.wrap { max-width: 860px; margin: 0 auto; padding: 0 var(--gutter); }
-
-header.top { display: flex; justify-content: space-between; align-items: center;
-  padding: 26px var(--gutter) 0; }
-header.top .brand { display: inline-flex; align-items: center; gap: 8px;
-  font: 800 18px var(--sans); letter-spacing: -.01em; color: var(--text); }
-header.top .brand img { width: 24px; height: 24px; }
-header.top .brand b { color: var(--i2-text); font-weight: inherit; }
-header.top a { font: 500 12px var(--mono); letter-spacing: .12em; text-transform: lowercase;
-  color: var(--text); border-bottom: 2px solid var(--ink2); padding-bottom: 2px; text-decoration: none; }
-
-.hero { padding: 6vh 0 0; }
-.kicker { font: 500 12px var(--mono); letter-spacing: .16em; text-transform: uppercase;
-  color: var(--i2-text); margin: 0 0 14px; }
-.hero h1 { font: 800 clamp(38px, 7vw, 64px)/0.96 var(--cond); text-transform: uppercase;
-  letter-spacing: -.01em; margin: 0; color: var(--ink1);
-  text-shadow: var(--off) var(--off) 0 var(--ink2); text-wrap: balance; }
-.standfirst { font-size: clamp(18px, 2.4vw, 22px); line-height: 1.4; margin: 20px 0 0; max-width: 32em; }
-.meta { font: 500 12px var(--mono); color: var(--faint); margin-top: 18px; letter-spacing: .04em; }
-
-section.sec { padding: 54px 0 0; }
-h2 { font: 500 12px var(--mono); letter-spacing: .18em; text-transform: lowercase;
-  color: var(--i2-text); margin: 0 0 14px; }
-h3 { font: 800 21px var(--cond); text-transform: uppercase; letter-spacing: .01em; margin: 0 0 8px; }
-p { margin: 0 0 1em; } strong { font-weight: 700; } em { font-style: italic; }
-code { font: 12.5px var(--mono); background: var(--wash1); color: var(--i1-text); padding: 1px 5px; }
-.lead { font-size: 18px; }
-.aside { font-size: 14.5px; color: var(--faint); }
-
-figure { margin: 18px 0 6px; }
-figcaption { font: 500 11.5px var(--mono); color: var(--faint); margin-top: 8px; letter-spacing: .03em; }
-
-/* the dial: ink1 → ink2 attenuation range */
-.dial { height: 54px; border: 2px solid var(--ink1);
-  background: linear-gradient(90deg, var(--wash1) 0%, var(--paper) 55%, var(--wash2) 100%);
-  position: relative; display: flex; align-items: center; }
-.dial .end { font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: .06em; padding: 0 16px; color: var(--text); }
-.dial .end.r { margin-left: auto; color: var(--i2-text); }
-.dial .pip { position: absolute; left: 22%; top: -9px; bottom: -9px; width: 3px; background: var(--ink2); }
-
-/* capability matrix */
-.grid2 { display: grid; grid-template-columns: 150px 1fr 1fr; gap: 8px; align-items: stretch; }
-.grid2 .cell { padding: 12px 14px; border: 2px solid var(--ink1); background: var(--card); font-size: 14.5px; }
-.grid2 .axis { background: transparent; border: none; font: 500 11px var(--mono);
-  text-transform: uppercase; letter-spacing: .05em; color: var(--faint); display: flex; align-items: center; }
-.grid2 .hd { font: 500 11px var(--mono); letter-spacing: .05em; text-transform: uppercase;
-  color: var(--faint); background: transparent; border: none; text-align: center; }
-.cell .tag { font: 500 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; display: block; margin-bottom: 4px; }
-.easy .tag { color: var(--i1-text); }
-.mid .tag { color: var(--warn); }
-.hard .tag { color: var(--i2-text); }
-@media (max-width: 620px) { .grid2 { grid-template-columns: 1fr; } .grid2 .axis, .grid2 .hd { display: none; } }
-
-/* cheap/dear loops */
-.loops { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
-@media (max-width: 700px) { .loops { grid-template-columns: 1fr; } }
-.loop { border: 2px solid var(--ink1); background: var(--card); padding: 16px; font-size: 14px; }
-.loop h4 { margin: 0 0 10px; font: 800 15px var(--cond); text-transform: uppercase; letter-spacing: .02em; }
-.loop .row { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
-.loop .cheap, .loop .dear { padding: 5px 8px; font: 500 11px var(--mono); line-height: 1.3; flex: 1; }
-.loop .cheap { background: var(--wash1); color: var(--i1-text); }
-.loop .dear { background: var(--wash2); color: var(--i2-text); }
-.loop .arr { font: 500 11px var(--mono); color: var(--faint); white-space: nowrap; }
-.loop .res { font: 500 10.5px var(--mono); color: var(--faint); margin-top: 7px; line-height: 1.4; }
-.loop .res b { color: var(--text); font-weight: 600; }
-
-/* two-layer stack */
-.stack { display: flex; flex-direction: column; gap: 10px; }
-.band { border: 2px solid var(--ink1); padding: 14px 16px; }
-.band.app { background: var(--card); }
-.band.plat { background: var(--wash1); }
-.band .lbl { font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 10px; }
-.chips { display: flex; flex-wrap: wrap; gap: 7px; }
-a.chip { font: 12px var(--mono); padding: 5px 10px; border: 1px solid var(--rule);
-  background: var(--paper); white-space: nowrap; text-decoration: none; color: var(--text); transition: border-color .12s; }
-a.chip b { color: var(--i2-text); font-weight: 600; }
-a.chip:hover { border-color: var(--ink2); }
-.between { text-align: center; font: 500 11px var(--mono); color: var(--faint); letter-spacing: .04em; }
-
-/* flow steps */
-.flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
-.flow .step { flex: 1; min-width: 150px; border: 2px solid var(--ink1); background: var(--card); padding: 12px 14px; font-size: 13.5px; }
-.flow .step .s { font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--i2-text); display: block; margin-bottom: 4px; }
-
-/* RFC table */
-table { width: 100%; border-collapse: collapse; font-size: 14.5px; margin-top: 6px; }
-td, th { text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
-th { font: 500 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
-td .id { font: 12.5px var(--mono); white-space: nowrap; }
-td .id a { color: var(--i1-text); text-decoration: none; border-bottom: 1px solid var(--ink2); }
-.st { font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; white-space: nowrap; background: var(--wash1); color: var(--i1-text); }
-
-footer { margin-top: 64px; padding: 22px 0 56px; border-top: 1px solid var(--rule);
-  font: 500 12px var(--mono); color: var(--faint); text-transform: lowercase; letter-spacing: .05em; }
-footer a { color: var(--faint); }
+  /* RFC table */
+  table { font-size: 14.5px; }
+  td .id { font: 500 12.5px/1 var(--mono); white-space: nowrap; }
+  td .id a { color: var(--i2-text); text-decoration: none; border-bottom: 1px solid var(--ink2); }
+  .st { font: 500 10px/1 var(--mono); text-transform: lowercase; letter-spacing: .08em; padding: 3px 8px; border-radius: 999px; white-space: nowrap; display: inline-block; }
+  .st.spec { background: var(--wash1); color: var(--i1-text); }
+  .note { font-size: 14.5px; color: var(--faint); background: none; border: none; padding: 0; }
 </style>
 </head>
 <body>
   <header class="top">
-    <span class="brand"><img src="icon.png" alt="" width="22" height="22" style="vertical-align:-5px;margin-right:7px">oauth<b>3</b></span>
-    <span><a href="index.html">← back to oauth3</a></span>
+    <span class="wordmark"><img src="icon.png" alt="">oauth<b>3</b></span>
+    <span><a class="signin" href="index.html">← back to oauth3</a></span>
   </header>
 
   <main class="wrap">
     <div class="hero">
       <p class="kicker">roadmap snapshot</p>
-      <h1>interoperability for all</h1>
+      <h1 class="display">interoperability for all</h1>
       <p class="standfirst">Use any account you have with the apps and agents you choose, on your terms. oauth3 keeps your credentials sealed in a TEE and hands each app a narrow, revocable slice — reaching any site you can log into, through your cookies, or a browser in the enclave for sites with no API.</p>
       <p class="meta">2026-06-25 · a design snapshot, not a spec · most of it is written down, not built yet · each part links to its RFC</p>
     </div>
 
-    <section class="sec">
-      <h2>the dial</h2>
+    <section class="block">
+      <h2 class="k">the dial</h2>
       <p class="lead">To let an app use one of your accounts today, you hand it the whole login cookie, and everything that cookie can do. OAuth1 and OAuth2 only let the provider hand out the scopes the provider defined. oauth3 puts a control between you and the app. The credential stays sealed in a TEE, and the app gets a token scoped to whatever you allow: a single read, one category of data, or the full credential if that is what you want. You set the amount, and the TEE enforces it.</p>
       <figure>
         <div class="dial">
@@ -216,8 +106,8 @@ footer a { color: var(--faint); }
       </figure>
     </section>
 
-    <section class="sec">
-      <h2>what an app does with your data</h2>
+    <section class="block">
+      <h2 class="k">what an app does with your data</h2>
       <p>Before an app is listed, a checker reads its code and writes down what it does, in plain words: reads your full watch history, writes nothing, sends it only to your TinyCloud. The app runs attested, so what it actually does is held to that description and cannot exceed it. How hard the check is depends on how much the app asks for and how far its code can be verified.</p>
       <figure>
         <div class="grid2">
@@ -235,11 +125,11 @@ footer a { color: var(--faint); }
         </div>
         <figcaption>a broad ask is fine when the code can be checked. a broad ask from code that can't be checked needs you to override it deliberately.</figcaption>
       </figure>
-      <p class="aside">The aim is not to keep every app on a short leash. A lot of access is fine when it is stated plainly and you can confirm the statement is true.</p>
+      <p class="note">The aim is not to keep every app on a short leash. A lot of access is fine when it is stated plainly and you can confirm the statement is true.</p>
     </section>
 
-    <section class="sec">
-      <h2>reaching your accounts from another device</h2>
+    <section class="block">
+      <h2 class="k">reaching your accounts from another device</h2>
       <p>The extension is the only thing that puts a credential into the pod. Once it is sealed there, any device reads it through a sign-in you have linked — Google, GitHub, or a Matrix homeserver — holding only a token. The credential never copies to the second device. The laptop with the extension is where credentials go in; everything else signs in and reads.</p>
       <figure>
         <div class="flow">
@@ -252,8 +142,8 @@ footer a { color: var(--faint); }
       </figure>
     </section>
 
-    <section class="sec">
-      <h2>using someone else's data without moving it</h2>
+    <section class="block">
+      <h2 class="k">using someone else's data without moving it</h2>
       <p>Other people run their own pods. The same app, identified by its code, runs on yours and theirs. A data room holds members' data under a policy that records which code is allowed to touch it. Admitting a new version of the app, a peer's pod, or a visiting agent is the same operation, and every member can decline it, per record, before their data is included. This builds on existing work on opting out of TEE app upgrades.</p>
       <figure>
         <div class="flow">
@@ -264,8 +154,8 @@ footer a { color: var(--faint); }
       </figure>
     </section>
 
-    <section class="sec">
-      <h2>spend effort where it pays, and learn</h2>
+    <section class="block">
+      <h2 class="k">spend effort where it pays, and learn</h2>
       <p>One design idea runs through three parts of the system. Each has a cheap way to decide and a slow, expensive way to decide. It uses the cheap way by default and pays for the expensive one only where it is worth it. Then it records what it decided and what happened, so the cheap way gets better and the expensive one is needed less. The more the system is used, the cheaper and more accurate it gets — it is built to improve as it runs, not to be tuned by hand.</p>
       <figure>
         <div class="loops">
@@ -292,8 +182,8 @@ footer a { color: var(--faint); }
       </figure>
     </section>
 
-    <section class="sec">
-      <h2>approval that starts cautious and grows</h2>
+    <section class="block">
+      <h2 class="k">approval that starts cautious and grows</h2>
       <p>What an app or agent needs your sign-off for depends on how reversible the action is and who it touches. Something reversible that affects only its own work, it does. Something reversible that touches your other data, it proposes and waits. Something irreversible that affects other people, it can only draft, and you decide. It starts cautious and earns a wider berth as it proves itself, one kind of action at a time. The aim is not to ask about everything, or to act on everything, but to keep that balance right and keep adjusting it.</p>
       <figure>
         <div class="flow">
@@ -305,8 +195,8 @@ footer a { color: var(--faint); }
       </figure>
     </section>
 
-    <section class="sec">
-      <h2>the pieces</h2>
+    <section class="block">
+      <h2 class="k">the pieces</h2>
       <p>Underneath, the work splits across two repositories. <strong>oauth3-server</strong> is the application layer and deploys as a project onto the platform. <strong>tee-daemon</strong> (dstack-webhost) is the platform: the TEE, attestation, the credential broker, the curated-list machinery. The application RFCs build on the platform ones.</p>
       <figure>
         <div class="stack">
@@ -339,20 +229,23 @@ footer a { color: var(--faint); }
       <table>
         <thead><tr><th>rfc</th><th>title</th><th>what it settles</th><th></th></tr></thead>
         <tbody>
-          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0000-opportunistic-spend.md">o3·0000</a></span></td><td>Opportunistic spend</td><td>the cheap-default / spend-where-it-pays pattern the loops share</td><td><span class="st">spec</span></td></tr>
-          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0001-adapter-reification-loop.md">o3·0001</a></span></td><td>Adapter reification</td><td>turn a slow browser read into a fast API call, where it's hot</td><td><span class="st">spec</span></td></tr>
-          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0002-federated-login-providers.md">o3·0002</a></span></td><td>Federated login</td><td>sign in with GitHub, Google, or Matrix — no app approval needed</td><td><span class="st">spec · next</span></td></tr>
-          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0003-delegation-continuum.md">o3·0003</a></span></td><td>Delegation continuum</td><td>one kind of grant, from a scoped read to the raw credential</td><td><span class="st">spec</span></td></tr>
-          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0004-capability-statements.md">o3·0004</a></span></td><td>Capability statements</td><td>plain-words claims about an app, and how they're checked</td><td><span class="st">spec</span></td></tr>
-          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0005-runtime-step-up-authorization.md">o3·0005</a></span></td><td>Runtime step-up</td><td>pause a risky read and ask you, even with a valid token</td><td><span class="st">spec</span></td></tr>
-          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0006-ambassadors-and-data-rooms.md">o3·0006</a></span></td><td>Ambassadors &amp; data rooms</td><td>run an app over someone else's data, in place or by copy</td><td><span class="st">spec</span></td></tr>
-          <tr><td><span class="id"><a href="https://github.com/amiller/dstack-webhost/issues/37">td·0024</a></span></td><td>Cross-pod federation</td><td>the platform half of 0006 — which code may touch a room's data</td><td><span class="st">spec</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0000-opportunistic-spend.md">o3·0000</a></span></td><td>Opportunistic spend</td><td>the cheap-default / spend-where-it-pays pattern the loops share</td><td><span class="st spec">spec</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0001-adapter-reification-loop.md">o3·0001</a></span></td><td>Adapter reification</td><td>turn a slow browser read into a fast API call, where it's hot</td><td><span class="st spec">spec</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0002-federated-login-providers.md">o3·0002</a></span></td><td>Federated login</td><td>sign in with GitHub, Google, or Matrix — no app approval needed</td><td><span class="st spec">spec · next</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0003-delegation-continuum.md">o3·0003</a></span></td><td>Delegation continuum</td><td>one kind of grant, from a scoped read to the raw credential</td><td><span class="st spec">spec</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0004-capability-statements.md">o3·0004</a></span></td><td>Capability statements</td><td>plain-words claims about an app, and how they're checked</td><td><span class="st spec">spec</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0005-runtime-step-up-authorization.md">o3·0005</a></span></td><td>Runtime step-up</td><td>pause a risky read and ask you, even with a valid token</td><td><span class="st spec">spec</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/teleport-computer/oauth3-server/blob/main/rfcs/0006-ambassadors-and-data-rooms.md">o3·0006</a></span></td><td>Ambassadors &amp; data rooms</td><td>run an app over someone else's data, in place or by copy</td><td><span class="st spec">spec</span></td></tr>
+          <tr><td><span class="id"><a href="https://github.com/amiller/dstack-webhost/issues/37">td·0024</a></span></td><td>Cross-pod federation</td><td>the platform half of 0006 — which code may touch a room's data</td><td><span class="st spec">spec</span></td></tr>
         </tbody>
       </table>
-      <p class="aside" style="margin-top:14px">Live today, under all of this: the instance on the pod, cookie ingest with no install, the Otter and Reddit adapters, multi-tenant identity, and the full <code>connect → approve → token → revoke</code> flow. The RFCs are where it goes next.</p>
+      <p class="note" style="margin-top:14px">Live today, under all of this: the instance on the pod, cookie ingest with no install, the Otter and Reddit adapters, multi-tenant identity, and the full <code>connect → approve → token → revoke</code> flow. The RFCs are where it goes next.</p>
     </section>
 
-    <footer>oauth3 · roadmap snapshot 2026-06-25 · <a href="index.html">home</a> · <a href="https://github.com/teleport-computer/oauth3-server/tree/main/rfcs">rfcs</a> · running on a dstack tee-daemon</footer>
+    <footer>
+      <div class="halftone"></div>
+      <p class="ftxt">oauth3 · roadmap snapshot 2026-06-25 · <a href="index.html">home</a> · <a href="https://github.com/teleport-computer/oauth3-server/tree/main/rfcs">rfcs</a> · running on a dstack tee-daemon</p>
+    </footer>
   </main>
 </body>
 </html>
