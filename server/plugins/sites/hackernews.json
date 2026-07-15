@@ -1,0 +1,44 @@
+{
+  "id": "hackernews",
+  "label": "Hacker News (upvoted + karma)",
+  "cookieDomains": ["news.ycombinator.com"],
+  "loginCookie": "user",
+  "reads": {
+    "items": {
+      "url": "https://news.ycombinator.com/upvoted?id={user}",
+      "auth": true,
+      "html": {
+        "rowSplit": "<tr class=['\"]athing",
+        "id": "id=['\"](\\d+)",
+        "title": "class=\"titleline\"><a href=\"([^\"]+)\"[^>]*>([^<]+)</a>",
+        "titleGroup": 2,
+        "urlGroup": 1
+      }
+    },
+    "account": {
+      "url": "https://hacker-news.firebaseio.com/v0/user/{user}.json",
+      "auth": false,
+      "json": {
+        "id": "{user}",
+        "map": [
+          { "key": "karma", "label": "Karma", "path": "karma" },
+          { "key": "submissions", "label": "Submissions", "path": "submitted", "count": true },
+          { "key": "created", "label": "Member since", "path": "created", "date": true }
+        ]
+      }
+    },
+    "item": {
+      "url": "https://hacker-news.firebaseio.com/v0/item/{id}.json",
+      "auth": false,
+      "json": { "item": { "id": "id", "title": "title", "url": "url", "by": "by", "score": "score", "text": "text" } }
+    }
+  },
+  "scopes": [
+    {
+      "id": "hackernews:karma",
+      "reads": ["account"],
+      "label": "read-only · your Hacker News identity and karma · not your upvotes, comments, or submissions"
+    }
+  ],
+  "capability": "CAN read your Hacker News karma/identity and your upvoted submissions. CANNOT vote, comment, submit, or change your account."
+}
