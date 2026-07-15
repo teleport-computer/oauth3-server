@@ -1,0 +1,8 @@
+----- / -----
+{"url":"https://78ffc78c25e0c8a9e64bb3a969ba6f226abae62d-8080.dstack-pha-prod7.phala.network/oauth3/","title":"Home — OAuth3","paperVar":"#0e1f21","ink1Var":"#2fbdc4","bodyBg":"rgb(14, 31, 33)","indigoInDOM":false,"headerHTML":"<img src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEgAAABICAYAAABV7bNHAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAA"}
+----- /privacy -----
+{"url":"https://78ffc78c25e0c8a9e64bb3a969ba6f226abae62d-8080.dstack-pha-prod7.phala.network/oauth3/privacy","title":"Privacy — OAuth3","paperVar":"#0e1f21","ink1Var":"#2fbdc4","bodyBg":"rgb(14, 31, 33)","indigoInDOM":false,"headerHTML":"<img src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEgAAABICAYAAABV7bNHAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAA"}
+----- /terms -----
+{"url":"https://78ffc78c25e0c8a9e64bb3a969ba6f226abae62d-8080.dstack-pha-prod7.phala.network/oauth3/terms","title":"Terms — OAuth3","paperVar":"#0e1f21","ink1Var":"#2fbdc4","bodyBg":"rgb(14, 31, 33)","indigoInDOM":false,"headerHTML":"<img src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEgAAABICAYAAABV7bNHAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAA"}
+----- /evidence -----
+{"url":"https://78ffc78c25e0c8a9e64bb3a969ba6f226abae62d-8080.dstack-pha-prod7.phala.network/oauth3/evidence","title":"Evidence — OAuth3","paperVar":"#0e1f21","ink1Var":"#2fbdc4","bodyBg":"rgb(14, 31, 33)","indigoInDOM":false,"headerHTML":"<img src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEgAAABICAYAAABV7bNHAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAA"}
