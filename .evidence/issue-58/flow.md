@@ -64,3 +64,27 @@ can be labeled `ready-to-merge`.
 - `render-proof.txt` — per-page runtime render proof (url/title/--paper/--ink1/bodyBg/indigoInDOM/wordmark)
 - `live-fetch-transcript.txt` — the evidence-page live-fetch resolution (`dev`)
 - `flow.md` — this file
+
+---
+
+## Resolution — 2026-07-15 (PNG screenshots captured; blocker lifted)
+
+The sole open gate above ("Need from operator: restart the envoy/neko screenshot path") is now
+**resolved**. The envoy bridge screenshot tool is working again — a baseline `screenshot` against
+`about:blank` returns a real PNG (`{"success":true,"result":"data:image/png;base64,…"}`), and the
+per-page captures below all succeed. So the Tier-2 PNG step screenshots that were missing are now
+**committed to this dir**:
+
+- `01-home.png` — `/oauth3/`
+- `02-privacy.png` — `/oauth3/privacy`
+- `03-terms.png` — `/oauth3/terms`
+- `04-evidence.png` — `/oauth3/evidence`
+
+Each was driven through the **real** envoy/neko Brave bridge (no CDP/Playwright, per LESSONS) on the
+deployed staging node, with `location.href` asserted per step. Non-blank verified (pixel stddev
+17–24, 143–200 unique byte values per 1912×943 frame). Runtime probe per page: navigation OK,
+`indigoInDOM:false`, `--paper:#0e1f21`, `bodyBg rgb(14,31,33)`. Evidence page `#att-status` =
+**`dev`** (the live-fetch ran). Full per-step detail: `tier2-walk-2026-07-15.md`.
+
+All three `## Acceptance` items are now demonstrated with committed PNG evidence — the PR is
+`ready-to-merge`.
