@@ -54,6 +54,10 @@ export interface Plugin {
   // Gated at the handler by owner OR a structured cap (e.g. write:event:<id>); plugins
   // that don't expose writes leave this undefined.
   editItem?(jar: Jar, id: string, patch: unknown): Promise<unknown>;
+  // Optional usage/quota read: provider-side usage numbers for the logged-in account
+  // (e.g. z.ai GLM Coding Plan quota %). Behind a scope ingredient like `zai:usage-read`.
+  // Gated at the handler read chokepoint (readKind "quota"); returned by GET /api/:plugin/quota.
+  quota?(jar: Jar): Promise<unknown>;
 
   // RFC 0007 §2.4: capability statement + sub-capabilities
   capability?: CapabilityStatement; // the plugin-wide (b2) statement

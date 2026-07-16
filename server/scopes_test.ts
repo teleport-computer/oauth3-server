@@ -149,7 +149,7 @@ Deno.test("pluginCapabilities: a CAN/CANNOT statement for every in-tree plugin",
   const all = pluginCapabilities();
   assertEquals(
     all.map((p) => p.plugin).sort(),
-    ["amazon", "google-calendar", "nytimes", "otter", "reddit", "twitter", "youtube"],
+    ["amazon", "google-calendar", "nytimes", "otter", "reddit", "twitter", "youtube", "zai"],
   );
   for (const p of all) {
     assert(p.statement.length > 0, `${p.plugin} has a statement`);
@@ -193,7 +193,7 @@ Deno.test("handler GET /api/scopes — ledger also surfaces the plugin statement
 // utilities cover the issue's seed list, and >=3 consume a real enforced scope (acceptance).
 Deno.test("appDeclarations: every consumed id resolves to an enforced ingredient", () => {
   const apps = appDeclarations();
-  assertEquals(apps.map((a) => a.id).sort(), ["calendar-share", "feedling", "otterpilot", "reddit-karma"]);
+  assertEquals(apps.map((a) => a.id).sort(), ["calendar-share", "feedling", "otterpilot", "reddit-karma", "zai-usage"]);
   for (const a of apps) {
     for (const c of a.consumedScopes) {
       assert(c.enforced, `${a.id} consumes ${c.id} which must be enforced (not hollow)`);
