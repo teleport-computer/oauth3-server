@@ -86,6 +86,10 @@ export interface Plugin {
   // OR the `amazon:cart-substitute` cap. Throws SubstituteDeniedError (code "denied") for any
   // shape the cap must not permit; the handler maps that to 403.
   substitute?(jar: Jar, op: Partial<SubstituteOp>): Promise<SubstituteResult>;
+  // Optional usage/quota read: provider-side usage numbers for the logged-in account
+  // (e.g. z.ai GLM Coding Plan quota %). Behind a scope ingredient like `zai:usage-read`.
+  // Gated at the handler read chokepoint (readKind "quota"); returned by GET /api/:plugin/quota.
+  quota?(jar: Jar): Promise<unknown>;
 
   // RFC 0007 §2.4: capability statement + sub-capabilities
   capability?: CapabilityStatement; // the plugin-wide (b2) statement

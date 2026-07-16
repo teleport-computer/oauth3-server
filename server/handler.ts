@@ -15,6 +15,7 @@
 //   POST   /api/connect/:requestId/approve|deny  owner_secret — the user's decision
 //   GET    /approve/:requestId                HTML approval screen
 //   GET    /api/:plugin/account              scoped token OR owner — account-level data (identity + karma)
+//   GET    /api/:plugin/quota                scoped token OR owner — usage/quota numbers (e.g. z.ai Coding Plan)
 //   GET    /api/:plugin/items[/:id]           scoped token OR owner — read
 //        list (/items)    → {plugin, items:[{id,title,date?,meta?}], data:items}  (prefer `items`; `data` is a back-compat alias)
 //        one   (/items/:id) → {plugin, data:<item>}
@@ -46,6 +47,7 @@ import { configureOtter } from "./plugins/otter.ts";
 import { configureReddit } from "./plugins/reddit.ts";
 import { amazonPlugin, configureAmazon } from "./plugins/amazon.ts";
 import type { Jar, SubstituteOp } from "./plugins/types.ts";
+import { configureZai } from "./plugins/zai.ts";
 import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.ts";
 import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot, browserFeed } from "./browser.ts";
@@ -90,6 +92,7 @@ async function init(env: Record<string, string>, dataDir: string) {
   configureOtter(env);
   configureReddit(env);
   configureAmazon(env);
+  configureZai(env);
   await initListings(dataDir);
   await initEval(dataDir);
   ownerSecret = env.OWNER_SECRET || env.OAUTH3_OWNER_SECRET || env.EXT_SHARED_SECRET || "";
@@ -981,6 +984,33 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       await audit("account", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, account: data });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  // --- usage/quota (scoped token or owner): provider-side usage numbers for the logged-in
+  // account. For zai this is the GLM Coding Plan dashboard (5h/weekly quota %, tokens, per
+  // model) — the read behind the `zai:usage-read` scope ingredient. Same chokepoint as
+  // /items (readKind "quota"), so a usage-scoped token is confined to this and nothing else. ---
+  const quo = path.match(/^\/api\/([a-z0-9-]+)\/quota$/);
+  if (req.method === "GET" && quo) {
+    const plugin = getPlugin(quo[1]);
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    if (!plugin.quota) return json({ error: `${plugin.id} has no quota view` }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verify(bearer, plugin.id);
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "quota", bearer); if (denied) return denied;
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const jar = getJar(subj, plugin.id);
+    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    try {
+      const data = await plugin.quota(jar);
+      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      await audit("quota", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
+      return json({ plugin: plugin.id, data });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
     }
