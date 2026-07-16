@@ -11,18 +11,16 @@
 // The single read surface is `quota()` (behind the `zai:usage-read` scope ingredient,
 // readKind "quota"); this app does no item reads, so listItems/fetchItem throw.
 //
-// Upstream endpoints (verified reachable 2026-07-16 via tasks/zai-token-grab.js, which
-// confirms GET /api/monitor/usage/quota/limit returns 200 for a valid bearer):
-//   /api/monitor/usage/quota/limit                         -> 5h % + weekly % + reset
-//   /api/monitor/usage/model-usage?startTime=..&endTime=.. -> total tokens + per-model
-//   /api/monitor/usage/tool-usage?startTime=..&endTime=..  -> search/reader usage (optional)
-//
-// CALIBRATION SEAM — the exact RESPONSE FIELD NAMES of those three endpoints are not yet
-// captured from the live API. The extraction below (UPSTREAM section) encodes the single
-// assumed shape; every field is pulled through pick()/unwrap(), which throw a
-// self-describing error naming the missing field and dumping the actual response keys.
-// So the FIRST real owner read either returns real numbers (assumption correct) or a
-// precise diagnostic that names exactly which field to fix — never a fabricated value.
+// Upstream endpoints (response shapes verified against the live z.ai API 2026-07-16):
+//   /api/monitor/usage/quota/limit  -> { code, msg, success, data:{ limits:[
+//        { type:"TIME_LIMIT",  usage, currentValue, percentage, nextResetTime, usageDetails },  // search/reader
+//        { type:"TOKENS_LIMIT", percentage, nextResetTime },   // resets soonest = 5-hour window
+//        { type:"TOKENS_LIMIT", percentage, nextResetTime } ], level }}  // resets latest = weekly window
+//   /api/monitor/usage/model-usage?startTime=&endTime=  (times as "yyyy-MM-dd HH:mm:ss") ->
+//        data:{ totalUsage:{ totalTokensUsage, modelSummaryList:[{modelName,totalTokens,sortOrder}] }, ... }
+// z.ai returns HTTP 200 even on failure; the real status is the {code,msg,success} envelope
+// (getJSON below throws on success:false). Unknown/renamed fields throw a self-describing
+// error (naming the missing field) rather than fabricating a value.
 
 import { Jar, Plugin, PluginListOptions } from "./types.ts";
 
@@ -40,9 +38,17 @@ function headers(jar: Jar): Record<string, string> {
 
 async function getJSON(path: string, jar: Jar): Promise<unknown> {
   const r = await fetch(`${BASE}${path}`, { headers: headers(jar), signal: AbortSignal.timeout(60_000) });
-  if (r.status === 401 || r.status === 403) throw new Error("z.ai rejected the token — session expired, re-sync the z.ai jar");
-  if (!r.ok) throw new Error(`z.ai ${path} ${r.status}: ${(await r.text()).slice(0, 200)}`);
-  return r.json();
+  if (!r.ok) throw new Error(`z.ai ${path} HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const body = await r.json();
+  // z.ai returns HTTP 200 even on failure — the real status is in the {code,msg,success}
+  // envelope, so status alone can't be trusted (verified: expired token → 200 + code 401).
+  const b = body as Record<string, unknown>;
+  if (b && typeof b === "object" && b.success === false) {
+    const code = b.code, msg = String(b.msg ?? "unknown error");
+    if (code === 401 || /token|auth/i.test(msg)) throw new Error(`z.ai rejected the token — ${msg} (re-sync the z.ai jar)`);
+    throw new Error(`z.ai ${path}: ${msg} (code ${code})`);
+  }
+  return body;
 }
 
 // z.ai wraps successful bodies in { code, msg, data }. Unwrap to data, honestly.
@@ -62,6 +68,11 @@ const num = (o: Record<string, unknown>, k: string, ctx: string): number => {
   if (!Number.isFinite(v)) throw new Error(`z.ai ${ctx}: field "${k}" is not numeric (${JSON.stringify(o[k])})`);
   return v;
 };
+
+// model-usage wants "yyyy-MM-dd HH:mm:ss" (verified; UTC accepted), not epoch ms.
+function fmtTime(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 19).replace("T", " ");
+}
 
 function toIso(v: unknown): string {
   if (typeof v === "number") return new Date(v).toISOString();
@@ -90,34 +101,46 @@ export const zaiPlugin: Plugin = {
     throw new Error(NO_ITEMS);
   },
 
-  // The one read surface — composes the three upstream endpoints into the app contract:
+  // The one read surface — composes two upstream reads into the app contract:
   //   { fiveHourPct, weeklyPct, weeklyResetIso, totalTokens7d, models:[{model,tokens}], searchReader? }
+  // Shapes verified against the live z.ai API 2026-07-16 (see decodeQuotaLimit/model-usage below).
   async quota(jar: Jar): Promise<unknown> {
-    const now = Date.now();
-    const weekAgo = now - 7 * 86_400_000;
-
-    // ---- UPSTREAM (calibration seam — assumed field names, see header) ----
-    const limit = unwrap(await getJSON("/api/monitor/usage/quota/limit", jar), "quota/limit");
-    const fiveHourPct = num(limit, "fiveHourPercent", "quota/limit");
-    const weeklyPct = num(limit, "weeklyPercent", "quota/limit");
-    const weeklyResetIso = toIso(pick(limit, "weeklyResetTime", "quota/limit"));
-
-    const mu = unwrap(await getJSON(`/api/monitor/usage/model-usage?startTime=${weekAgo}&endTime=${now}`, jar), "model-usage");
-    const totalTokens7d = num(mu, "totalTokens", "model-usage");
-    const rawModels = pick(mu, "models", "model-usage");
-    if (!Array.isArray(rawModels)) throw new Error(`z.ai model-usage: "models" is not an array (${JSON.stringify(rawModels).slice(0, 120)})`);
-    const models = rawModels.map((m, i) => {
-      const o = m as Record<string, unknown>;
-      return { model: String(pick(o, "model", `model-usage.models[${i}]`)), tokens: num(o, "tokens", `model-usage.models[${i}]`) };
-    });
-
-    // tool-usage is optional in the contract: a well-formed response with no tool data
-    // omits searchReader; a transport/auth error still propagates (no masking).
-    const data: Record<string, unknown> = { fiveHourPct, weeklyPct, weeklyResetIso, totalTokens7d, models };
-    const tu = unwrap(await getJSON(`/api/monitor/usage/tool-usage?startTime=${weekAgo}&endTime=${now}`, jar), "tool-usage");
-    if ("used" in tu && "limit" in tu) {
-      data.searchReader = { used: num(tu, "used", "tool-usage"), limit: num(tu, "limit", "tool-usage"), unit: tu.unit ? String(tu.unit) : "requests" };
+    // 1) quota/limit → a `limits[]` array. The two TOKENS_LIMIT entries are the 5-hour and
+    //    weekly token windows (distinguished by reset time: 5h resets sooner); the TIME_LIMIT
+    //    entry is the search/reader tool quota (currentValue used of `usage` limit).
+    const ql = unwrap(await getJSON("/api/monitor/usage/quota/limit", jar), "quota/limit");
+    const limits = ql.limits;
+    if (!Array.isArray(limits)) throw new Error(`z.ai quota/limit: "limits" is not an array (keys [${Object.keys(ql).join(", ")}])`);
+    const tokenLimits = (limits as Record<string, unknown>[])
+      .filter((l) => l?.type === "TOKENS_LIMIT")
+      .sort((a, b) => Number(a.nextResetTime) - Number(b.nextResetTime));
+    if (tokenLimits.length < 2) throw new Error(`z.ai quota/limit: expected 2 TOKENS_LIMIT windows (5h + weekly), got ${tokenLimits.length}`);
+    const fiveHour = tokenLimits[0]; // resets soonest = the 5-hour window
+    const weekly = tokenLimits[tokenLimits.length - 1]; // resets latest = the weekly window
+    const data: Record<string, unknown> = {
+      fiveHourPct: num(fiveHour, "percentage", "quota/limit 5h window"),
+      weeklyPct: num(weekly, "percentage", "quota/limit weekly window"),
+      weeklyResetIso: toIso(pick(weekly, "nextResetTime", "quota/limit weekly window")),
+    };
+    const tool = (limits as Record<string, unknown>[]).find((l) => l?.type === "TIME_LIMIT");
+    if (tool && "usage" in tool && "currentValue" in tool) {
+      data.searchReader = { used: Number(tool.currentValue), limit: Number(tool.usage), unit: "requests" };
     }
+
+    // 2) model-usage → total tokens (7d) + per-model totals. startTime/endTime want
+    //    "yyyy-MM-dd HH:mm:ss" (UTC accepted). totalUsage carries both the grand total and
+    //    the per-model summary.
+    const now = Date.now();
+    const qs = `startTime=${encodeURIComponent(fmtTime(now - 7 * 86_400_000))}&endTime=${encodeURIComponent(fmtTime(now))}`;
+    const mu = unwrap(await getJSON(`/api/monitor/usage/model-usage?${qs}`, jar), "model-usage");
+    const tot = (mu.totalUsage ?? mu) as Record<string, unknown>;
+    data.totalTokens7d = num(tot, "totalTokensUsage", "model-usage.totalUsage");
+    const summary = (mu.modelSummaryList ?? tot.modelSummaryList) as unknown;
+    if (!Array.isArray(summary)) throw new Error(`z.ai model-usage: no modelSummaryList (keys [${Object.keys(mu).join(", ")}])`);
+    data.models = (summary as Record<string, unknown>[])
+      .slice()
+      .sort((a, b) => Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0))
+      .map((m, i) => ({ model: String(pick(m, "modelName", `model-usage.modelSummaryList[${i}]`)), tokens: num(m, "totalTokens", `model-usage.modelSummaryList[${i}]`) }));
     return data;
   },
 };
