@@ -214,11 +214,11 @@ Deno.test("handler GET /api/scopes(+/:id) — public, exact enforced label", asy
 Deno.test("pluginCapabilities: a CAN/CANNOT statement for every registered plugin", () => {
   const all = pluginCapabilities();
   // The invariant is coverage of the live registry — in-tree code plugins AND declarative
-  // sites (server/plugins/sites/*.json), which contribute a statement the same way. The 7
+  // sites (server/plugins/sites/*.json), which contribute a statement the same way. The 8
   // in-tree plugins are a mandatory subset; declarative sites extend it without a code edit.
   const have = new Set(all.map((p) => p.plugin));
   for (const id of allPlugins().map((p) => p.id)) assert(have.has(id), `${id} has a capability statement`);
-  for (const id of ["amazon", "google-calendar", "nytimes", "otter", "reddit", "twitter", "youtube"]) {
+  for (const id of ["amazon", "google-calendar", "nytimes", "otter", "reddit", "twitter", "youtube", "zai"]) {
     assert(have.has(id), `in-tree ${id} has a statement`);
   }
   for (const p of all) {
@@ -263,7 +263,7 @@ Deno.test("handler GET /api/scopes — ledger also surfaces the plugin statement
 // utilities cover the issue's seed list, and >=3 consume a real enforced scope (acceptance).
 Deno.test("appDeclarations: every consumed id resolves to an enforced ingredient", () => {
   const apps = appDeclarations();
-  assertEquals(apps.map((a) => a.id).sort(), ["calendar-share", "feedling", "otterpilot", "reddit-karma"]);
+  assertEquals(apps.map((a) => a.id).sort(), ["calendar-share", "feedling", "otterpilot", "reddit-karma", "zai-usage"]);
   for (const a of apps) {
     for (const c of a.consumedScopes) {
       assert(c.enforced, `${a.id} consumes ${c.id} which must be enforced (not hollow)`);

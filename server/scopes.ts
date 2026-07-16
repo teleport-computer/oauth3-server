@@ -69,6 +69,14 @@ export const SCOPE_INGREDIENTS: Record<string, { plugin: string; reads: string[]
       label:
         "write · substitute ONE cart line — remove an ASIN, add ONE comparable ASIN within a price band and the same category · CANNOT check out, add arbitrary items, change address/payment, raise quantity, or read your cart/order history",
     },
+    // #76: the first usage/metering scope. A token confined to the /quota read chokepoint —
+    // your z.ai GLM Coding Plan usage numbers, nothing that touches the key or coding traffic.
+    "zai:usage-read": {
+      plugin: "zai",
+      reads: ["quota"],
+      label:
+        "read-only · your z.ai Coding Plan usage numbers (5-hour and weekly quota %, tokens, per-model) · not your API key, prompts, code, or account settings",
+    },
   };
 
 // Per-plugin capability statements (RFC 0009 step 1) — the operator-authored sentence shown
@@ -111,6 +119,11 @@ export const PLUGIN_CAPABILITIES: Record<string, { plugin: string; statement: st
     plugin: "amazon",
     statement:
       "CAN read your Amazon cart line items and a logged-in screenshot of your cart; a token MAY also carry an `amazon:cart-substitute` cap to swap ONE cart line for a comparable item within a price band and the same category. CANNOT check out, change address/payment, add arbitrary items, raise quantity, or read order history.",
+  },
+  zai: {
+    plugin: "zai",
+    statement:
+      "CAN read your z.ai GLM Coding Plan usage numbers (5-hour and weekly quota %, total tokens, per-model breakdown, search/reader usage). CANNOT see your API key, prompts, code, or account settings, and can make no changes.",
   },
 };
 
@@ -214,6 +227,13 @@ export const APP_DECLARATIONS: AppDeclaration[] = [
     consumes: ["calendar:free-busy"],
     offers: [],
     note: "the clearest novel-scope candidate: your upcoming free/busy, nothing else",
+  },
+  {
+    id: "zai-usage",
+    name: "z.ai usage — Coding Plan quotas",
+    consumes: ["zai:usage-read"],
+    offers: [],
+    note: "reads your z.ai Coding Plan usage numbers only; also feeds the swarm quota gate provider-truth",
   },
 ];
 
