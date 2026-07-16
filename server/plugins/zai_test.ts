@@ -2,11 +2,10 @@
 // `zai:usage-read` scope ingredient. No live z.ai dependency: a local mock serves the
 // three monitor endpoints and ZAI_BASE points the plugin at it via configureZai().
 //
-// NOTE ON GROUNDING: the mock encodes the plugin's ASSUMED upstream response shape (the
-// calibration seam documented in zai.ts). These tests prove the ROUTE, the SCOPE GATE, and
-// the upstream→contract COMPOSITION — not that the assumed field names match the live z.ai
-// API. If the live shape differs, quota() throws a self-describing error on the first real
-// owner read (never a fabricated number); update the mock + the pick() keys together.
+// The mock encodes the REAL z.ai response shapes (verified against the live API 2026-07-16):
+// quota/limit returns a limits[] array (2 TOKENS_LIMIT windows + 1 TIME_LIMIT tool quota),
+// model-usage returns data.totalUsage{totalTokensUsage, modelSummaryList}. These tests prove
+// the route, the scope gate, and the upstream→contract composition.
 
 import { assert, assertEquals, assertNotEquals } from "jsr:@std/assert";
 import { configureZai, zaiPlugin } from "./zai.ts";
@@ -17,17 +16,30 @@ import { recordTokenUse } from "../stepup.ts";
 const OWNER = "test-owner-secret";
 const JAR = { zai_token: "ey.fake.bearer" };
 
-// Assumed upstream shapes (must stay in sync with zai.ts's pick() keys — the seam).
-const LIMIT = { code: 200, msg: "ok", data: { fiveHourPercent: 3, weeklyPercent: 32, weeklyResetTime: "2026-07-22T00:00:00.000Z" } };
-const MODEL_USAGE = { data: { totalTokens: 291_000_000, models: [{ model: "glm-4.7", tokens: 250_000_000 }, { model: "glm-4.6", tokens: 41_000_000 }] } };
-const TOOL_USAGE = { data: { used: 12, limit: 100, unit: "requests" } };
+// Real z.ai response shapes. Reset times: 5h resets soonest, weekly latest, tool furthest.
+const SOON = 1784225948649, WEEK = 1784803512998, FAR = 1785667512995;
+const LIMIT = { code: 200, msg: "Operation successful", success: true, data: { limits: [
+  { type: "TIME_LIMIT", unit: 5, number: 1, usage: 4000, currentValue: 0, remaining: 4000, percentage: 0, nextResetTime: FAR, usageDetails: [{ modelCode: "search-prime", usage: 0 }] },
+  { type: "TOKENS_LIMIT", unit: 3, number: 5, percentage: 3, nextResetTime: SOON },
+  { type: "TOKENS_LIMIT", unit: 6, number: 1, percentage: 32, nextResetTime: WEEK },
+], level: "max" } };
+const MODEL_USAGE = { code: 200, msg: "Operation successful", success: true, data: {
+  x_time: ["2026-07-09 13:00"], granularity: "hourly",
+  totalUsage: { totalModelCallCount: 5866, totalTokensUsage: 291_000_000, modelSummaryList: [
+    { modelName: "GLM-5.2", totalTokens: 250_000_000, sortOrder: 1 },
+    { modelName: "GLM-4.7", totalTokens: 41_000_000, sortOrder: 2 },
+  ] },
+} };
+// z.ai returns HTTP 200 even on auth failure (envelope carries the real status).
+const AUTH_FAIL = { code: 401, msg: "token expired or incorrect", success: false };
 
 function mockZai(req: Request): Response {
   const u = new URL(req.url);
-  if (!req.headers.get("Authorization")?.startsWith("Bearer ")) return new Response("unauthorized", { status: 401 });
+  const tok = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+  if (!tok) return new Response("unauthorized", { status: 401 });
+  if (tok === "expired") return Response.json(AUTH_FAIL); // 200 + success:false
   if (u.pathname === "/api/monitor/usage/quota/limit") return Response.json(LIMIT);
   if (u.pathname === "/api/monitor/usage/model-usage") return Response.json(MODEL_USAGE);
-  if (u.pathname === "/api/monitor/usage/tool-usage") return Response.json(TOOL_USAGE);
   return new Response("not found", { status: 404 });
 }
 
@@ -50,13 +62,20 @@ Deno.test("zai usage: loggedIn keys on zai_token", () => {
 
 Deno.test("zai usage: quota() composes the app contract shape", async () => {
   const d = await zaiPlugin.quota!(JAR) as Record<string, unknown>;
-  assertEquals(d.fiveHourPct, 3);
-  assertEquals(d.weeklyPct, 32);
-  assertEquals(d.weeklyResetIso, "2026-07-22T00:00:00.000Z");
+  assertEquals(d.fiveHourPct, 3); // TOKENS_LIMIT resetting soonest
+  assertEquals(d.weeklyPct, 32); // TOKENS_LIMIT resetting latest
+  assertEquals(d.weeklyResetIso, new Date(WEEK).toISOString());
   assertEquals(d.totalTokens7d, 291_000_000);
   assertEquals((d.models as unknown[]).length, 2);
-  assertEquals((d.models as { model: string }[])[0].model, "glm-4.7");
-  assertEquals((d.searchReader as { used: number }).used, 12);
+  assertEquals((d.models as { model: string; tokens: number }[])[0], { model: "GLM-5.2", tokens: 250_000_000 });
+  assertEquals(d.searchReader, { used: 0, limit: 4000, unit: "requests" });
+});
+
+Deno.test("zai usage: HTTP-200-with-success:false surfaces as an honest error (not fake data)", async () => {
+  await zaiPlugin.quota!({ zai_token: "expired" }).then(
+    () => { throw new Error("should have thrown on token expired"); },
+    (e) => assert(/token expired|rejected the token/i.test((e as Error).message)),
+  );
 });
 
 Deno.test("zai usage: listItems/fetchItem throw (quota-only plugin)", async () => {
