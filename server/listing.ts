@@ -73,6 +73,13 @@ export const STATIC_LISTING: Listing[] = [
     statement: "Reads your YouTube feed items under a scoped, revocable read token to render a feed — read-only.",
     discharge: 1,
   },
+  {
+    appId: "zai-usage",
+    allowedPlugins: ["zai"],
+    maxScope: "read",
+    statement: "Reads your z.ai GLM Coding Plan usage (quota %, tokens, per-model) under a scoped, revocable read token — read-only, never your API key or prompts.",
+    discharge: 1,
+  },
 ];
 
 /**
