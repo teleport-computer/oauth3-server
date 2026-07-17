@@ -45,6 +45,13 @@ export const STATIC_LISTING: Listing[] = [
       "Lets a friend read your Amazon cart to suggest organic substitutions under a scoped, substitute-only capability — reads cart line items only, never checkout, address, payment, or order history.",
     discharge: 1,
   },
+  {
+    appId: "zai-usage",
+    allowedPlugins: ["zai"],
+    maxScope: "read",
+    statement: "Reads your z.ai GLM Coding Plan usage (quota %, tokens, per-model) under a scoped, revocable read token — read-only, never your API key or prompts.",
+    discharge: 1,
+  },
 ];
 
 /**
