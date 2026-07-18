@@ -254,3 +254,51 @@ Deno.test("handler: GET /api/:plugin/items/:id returns single item under `data` 
     plugin.fetchItem = origFetchItem;
   }
 });
+
+Deno.test("handler: connect approval satisfies first-use step-up, direct mint does not", async () => {
+  const plugin = getPlugin("otter")!;
+  const origLoggedIn = plugin.loggedIn;
+  const origListItems = plugin.listItems;
+  plugin.loggedIn = () => true;
+  plugin.listItems = () => Promise.resolve([{ id: "connected-item", title: "Connected item" }]);
+  try {
+    await setJar("owner", "otter", "default", { session: "connect-stepup-test" });
+
+    const direct = await ownerReq("POST", "/api/tokens", {
+      plugin: "otter",
+      app: "direct-mint-test",
+    });
+    assertEquals(direct.status, 200);
+    const directToken = (direct.json as { token: string }).token;
+    const challenged = await callHandler("GET", "/api/otter/items", undefined, {
+      Authorization: `Bearer ${directToken}`,
+    });
+    assertEquals(challenged.status, 409);
+    assertEquals((challenged.json as { error: string }).error, "challenge_pending");
+
+    const started = await callHandler("POST", "/api/connect", {
+      plugin: "otter",
+      app: "demo-app",
+    });
+    assertEquals(started.status, 200);
+    const requestId = (started.json as { requestId: string }).requestId;
+    const approved = await ownerReq("POST", `/api/connect/${requestId}/approve`, {
+      owner_secret: TEST_ENV.OAUTH3_OWNER_SECRET,
+    });
+    assertEquals(approved.status, 200);
+
+    const status = await callHandler("GET", `/api/connect/${requestId}`);
+    const connectedToken = (status.json as { token: string }).token;
+    const firstRead = await callHandler("GET", "/api/otter/items", undefined, {
+      Authorization: `Bearer ${connectedToken}`,
+    });
+    assertEquals(firstRead.status, 200);
+    assertEquals((firstRead.json as { items: unknown[] }).items, [{
+      id: "connected-item",
+      title: "Connected item",
+    }]);
+  } finally {
+    plugin.loggedIn = origLoggedIn;
+    plugin.listItems = origListItems;
+  }
+});

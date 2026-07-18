@@ -637,6 +637,9 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       }
       const r = action === "approve" ? await approveConnect(id, approver) : await denyConnect(id);
       if (!r) return json({ error: "unknown or already-decided request" }, 404);
+      // The connect approval is the user's informed consent, so it also satisfies the
+      // first-use step-up for the freshly minted token.
+      if (action === "approve" && r.token) await recordTokenUse(r.token, r.plugin);
       await audit(`connect.${action}`, { subject: approver, plugin: r.plugin, app: r.app, requestId: id });
       // RFC 0007 §4.1: fill outcome when user decides
       await updateEvalOutcome(r.app || id, r.plugin, action === "approve" ? "approved" : "denied");
