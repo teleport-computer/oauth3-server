@@ -41,10 +41,11 @@ import { evidencePage, homePage, privacyPage, termsPage } from "./home-page.ts";
 import { createSession, destroySession, initSessions, verifySession } from "./sessions.ts";
 import { newChallenge, verifyDidSignIn } from "./identity.ts";
 import { allCredentialIds, credentialsFor, initPasskeys, passkeyChallenge, verifyAuthentication, verifyRegistration } from "./passkey.ts";
-import { consumeState, enabledProviders, githubAuthUrl, githubEnv, githubExchange, googleAuthUrl, googleEnv, googleExchange, newState } from "./oidc.ts";
+import { consumeState, enabledProviders, githubAuthUrl, githubEnv, githubExchange, googleAuthUrl, googleCalendarAuthUrl, googleCalendarExchange, googleEnv, googleExchange, newState } from "./oidc.ts";
 import { configureOtter } from "./plugins/otter.ts";
 import { configureReddit } from "./plugins/reddit.ts";
 import { amazonPlugin, configureAmazon } from "./plugins/amazon.ts";
+import { configureGoogleCalendar } from "./plugins/google-calendar.ts";
 import type { Jar, SubstituteOp } from "./plugins/types.ts";
 import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.ts";
 import { verifySiwe } from "./siwe.ts";
@@ -90,6 +91,7 @@ async function init(env: Record<string, string>, dataDir: string) {
   configureOtter(env);
   configureReddit(env);
   configureAmazon(env);
+  configureGoogleCalendar(env);
   await initListings(dataDir);
   await initEval(dataDir);
   ownerSecret = env.OWNER_SECRET || env.OAUTH3_OWNER_SECRET || env.EXT_SHARED_SECRET || "";
@@ -353,6 +355,42 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
         return html(landingHtml(session, st.ret, "Signed in with GitHub."));
       } catch (e) {
         return html(landingHtml(null, dash, `GitHub sign-in error: ${(e as Error).message}.`));
+      }
+    }
+  }
+
+  // --- Google Calendar data grant. It is separate from login and stores a refresh token in
+  // the vault. A signed-in user links it to their existing subject. ---
+  if (path.startsWith("/api/login/google-calendar")) {
+    const g = googleEnv(ctx.env);
+    if (!g) return json({ error: "google login not configured" }, 404);
+    const base = publicUrl || origin;
+    const redirectUri = `${base}/api/login/google-calendar/callback`;
+    const dash = `${base}/dashboard`;
+    if (req.method === "GET" && path === "/api/login/google-calendar") {
+      const subj = subjectOf();
+      if (!subj) return json({ error: "sign in first to connect Google Calendar" }, 401);
+      const rp = url.searchParams.get("return");
+      const ret = rp && rp.startsWith(base) ? rp : dash;
+      return json({ url: googleCalendarAuthUrl(g, newState(ret, subj, "google-calendar"), redirectUri) });
+    }
+    if (req.method === "GET" && path === "/api/login/google-calendar/callback") {
+      const st = consumeState(url.searchParams.get("state") || "");
+      const code = url.searchParams.get("code") || "";
+      if (!st || st.purpose !== "google-calendar" || !code) return html(landingHtml(null, dash, "Google Calendar connection failed (bad state or code)."));
+      try {
+        const grant = await googleCalendarExchange(g, code, redirectUri);
+        const subject = st.linkSubject || `google:${grant.sub}`;
+        await setJar(subject, "google-calendar", "default", {
+          refresh_token: grant.refresh_token,
+          access_token: grant.access_token,
+          access_token_expires_at: String(Date.now() + (grant.expires_in || 3600) * 1000),
+        });
+        await audit("login.google-calendar", { subject });
+        const session = st.linkSubject ? null : await createSession(subject);
+        return html(landingHtml(session, st.ret, "Google Calendar connected."));
+      } catch (e) {
+        return html(landingHtml(null, dash, `Google Calendar connection error: ${(e as Error).message}.`));
       }
     }
   }
