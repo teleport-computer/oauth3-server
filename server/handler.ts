@@ -394,6 +394,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return json({
       plugins: allPlugins().map((p) => ({
         id: p.id, label: p.label, cookieDomains: p.cookieDomains, account: !!p.account,
+        // Tells the extension to read page storage instead of cookies for this plugin.
+        ...(p.tokenSource ? { tokenSource: p.tokenSource } : {}),
         jar: subj ? jarStatus(subj, p.id) : { present: false, updatedAt: 0, count: 0 },
       })),
     });

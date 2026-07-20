@@ -85,7 +85,16 @@ function toIso(v: unknown): string {
 export const zaiPlugin: Plugin = {
   id: "zai",
   label: "z.ai GLM Coding Plan (usage)",
-  cookieDomains: [".z.ai"], // jar is seeded with a bearer (zai_token), not scraped cookies
+  cookieDomains: [".z.ai"], // no usable cookie credential — see tokenSource below
+  // z.ai's credential is a localStorage bearer, not a cookie, so the extension reads it from a
+  // z.ai tab and syncs it as `zai_token`. Key order matches the hand-run grabber this replaces
+  // (tasks/zai-token-grab.js): the platform token first, the website token as the fallback name
+  // z.ai uses on some builds.
+  tokenSource: {
+    origin: "https://z.ai",
+    localStorage: ["z-ai-open-platform-token-production", "z-ai-website-token"],
+    jarKey: "zai_token",
+  },
   renderUrl: "https://z.ai/manage-apikey/coding-plan/personal/usage",
 
   loggedIn(jar: Jar): boolean {

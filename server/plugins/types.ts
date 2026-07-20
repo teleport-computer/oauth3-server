@@ -32,10 +32,24 @@ export interface PluginAccount {
   fields: PluginAccountField[]; // ordered named account fields (e.g. karma breakdown)
 }
 
+// Where a site keeps its credential when it ISN'T a cookie. z.ai authenticates with a bearer
+// held in localStorage, so a cookie sweep of .z.ai yields a jar with none of the keys the plugin
+// needs — "jar present but not logged in", unfixable from chrome.cookies alone. A plugin
+// declares the origin to read, the localStorage keys to try in order, and the jar key to store
+// the first hit under. The extension does the reading, so the value still only ever travels
+// from the user's own browser into the user's own jar.
+export interface PluginTokenSource {
+  origin: string; // e.g. "https://z.ai" — the tab whose localStorage is read
+  localStorage: string[]; // candidate keys, tried in order
+  jarKey: string; // jar key to store the first hit under, e.g. "zai_token"
+}
+
 export interface Plugin {
   id: string; // url-safe, e.g. "otter"
   label: string; // human, e.g. "ShapeRotator (Otter.ai)"
   cookieDomains: string[]; // extension grabs the WHOLE jar for these, e.g. [".otter.ai"]
+  // Set when the credential is NOT a cookie — the extension reads page storage instead.
+  tokenSource?: PluginTokenSource;
   renderUrl?: string; // page to load for /screenshot; defaults to https://www.<cookieDomain>
   loggedIn(jar: Jar): boolean; // cheap presence check on a key cookie
   listItems(jar: Jar, opts?: PluginListOptions): Promise<PluginItem[]>;
