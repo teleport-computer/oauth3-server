@@ -14,6 +14,9 @@
 //   GET    /api/connect/:requestId            app — poll status (token once approved)
 //   POST   /api/connect/:requestId/approve|deny  owner_secret — the user's decision
 //   GET    /approve/:requestId                HTML approval screen
+//   GET    /api/challenges/pending            session — the wallet's step-up inbox (RFC 0005)
+//   GET    /api/challenge/:id                 app — poll a step-up challenge's status
+//   POST   /api/challenge/:id/approve|deny    session/owner_secret — the user's step-up decision
 //   GET    /api/:plugin/account              scoped token OR owner — account-level data (identity + karma)
 //   GET    /api/:plugin/quota                scoped token OR owner — usage/quota numbers (e.g. z.ai Coding Plan)
 //   GET    /api/:plugin/items[/:id]           scoped token OR owner — read
@@ -51,7 +54,7 @@ import { browserScreenshot, browserFeed } from "./browser.ts";
 import { apiLike, apiMe, apiTimeline, apiTweet, apiUnlike, browserTrace } from "./twitter-actions.ts";
 import { appDeclarations, pluginCapabilities, scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
 import { proposeIngredients } from "./promoter.ts";
-import { approveChallenge, createChallenge, denyChallenge, getChallenge, recordTokenUse, score, wasFirstUse } from "./stepup.ts";
+import { approveChallenge, createChallenge, denyChallenge, getChallenge, pendingChallenges, recordTokenUse, score, wasFirstUse } from "./stepup.ts";
 
 let ready = false;
 let ownerSecret = "";
@@ -561,6 +564,30 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return html(approvePage(getConnect(ap[1]), ap[1]));
   }
 
+  // The wallet's inbox: every pending challenge raised against a token belonging to the
+  // signed-in subject, so the extension can surface a real approve/deny prompt. Discovery is
+  // deliberately server-side rather than the app passing its challengeId to the wallet — the
+  // confirmation must not travel the channel it exists to confirm. Challenges store only a
+  // 16-char token prefix, so match on that; owner sees all.
+  if (req.method === "GET" && path === "/api/challenges/pending") {
+    const subj = subjectOf();
+    if (!subj) return json({ error: "sign in to respond" }, 401);
+    const mine = new Set(
+      listTokens().filter((t) => subj === "owner" || t.subject === subj).map((t) => t.token.slice(0, 16)),
+    );
+    const out = pendingChallenges()
+      .filter((c) => subj === "owner" || mine.has(c.token))
+      .map((c) => ({
+        challengeId: c.challengeId,
+        plugin: c.plugin,
+        item: c.item,
+        app: c.app,
+        signal: c.signal,
+        expiresAt: c.expiresAt,
+      }));
+    return json({ challenges: out });
+  }
+
   // --- step-up challenges (RFC 0005) — out-of-band confirmation channel for the gate
   // below. The app polls GET, the user (session or owner_secret) answers POST. ---
   const ch = path.match(/^\/api\/challenge\/([^/]+)(?:\/(approve|deny))?$/);
@@ -644,7 +671,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       return json({ error: `scope: this token may read ${[...allowed].join("+")} only, not ${readKind}`, scope: scopeLabel(t?.caps) }, 403);
     }
     if (t && !isOwner(req)) {
-      const scored = score(bearer, pluginId, readKind, t.app);
+      const scored = score(bearer, pluginId, readKind, t.app, t.createdAt);
       if (scored.decision === "challenge") {
         const chal = createChallenge(pluginId, readKind, bearer, t.app, scored.signal || "unknown");
         await audit("stepup.challenged", {
