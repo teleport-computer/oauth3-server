@@ -4,6 +4,7 @@
 // requestId. The app never holds the owner secret.
 
 import { mint } from "./tokens.ts";
+import { recordTokenUse } from "./stepup.ts";
 import { route } from "./routing.ts";
 import type { RouteResult } from "./types.ts";
 
@@ -79,6 +80,7 @@ export async function approveConnect(id: string, approver: string): Promise<Conn
   const t = await mint(r.plugin, approver, r.app, r.caps);
   r.status = "approved";
   r.token = t.token;
+  recordTokenUse(t.token, r.plugin); // connect-approval IS the human check — skip the redundant first-read step-up (RFC 0005)
   await persist();
   return r;
 }
