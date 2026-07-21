@@ -148,3 +148,48 @@ Deno.test("vault: sealed legacy (2-part) vault migrates to 3-part account-qualif
     await Deno.remove(dir, { recursive: true }).catch(() => {});
   }
 });
+
+// #132 — strandedJars: a jar under a subject the current wallet no longer uses is stranded,
+// and reads today as "cookies expired" / "no jar". This pins the data-layer classification the
+// owner-scoped GET /api/jars/stranded surface and the extension popup consume. Acceptance #4
+// ("given a jar record whose subject differs from the wallet's, the popup renders the stranded
+// state") reduces to this classification at the vault seam.
+Deno.test("vault #132: strandedJars returns jars whose subject differs from the current wallet, excludes the current subject's own jars", async () => {
+  const { setJar, strandedJars, jarsFor } = await import("./vault.ts");
+  const retired = "u-d5082d09-retired-wallet";
+  const current = "u-b3c12b16-current-wallet";
+  // youtube was synced under the RETIRED wallet and never re-synced under the current one.
+  await setJar(retired, "youtube", "default", { SID: "stale" } as Jar);
+  // zai was re-synced under the current wallet (works today).
+  await setJar(current, "zai", "default", { session: "live" } as Jar);
+  // a second retired-subject plugin, to prove the classification is not plugin-specific.
+  await setJar(retired, "reddit", "me", { token: "stale" } as Jar);
+
+  // current wallet's own jars are NOT stranded (zai is live, not stranded).
+  assertEquals(jarsFor(current, "zai").length, 1);
+  // (the in-memory store is module-global, so filter to the subjects this test created —
+  // the same "unique subjects avoid cross-test collision" trick the other vault tests use.)
+  const mine = (arr: { subject: string; plugin: string; account: string }[]) =>
+    arr.filter((s) => s.subject === retired || s.subject === current)
+      .map((s) => `${s.subject}:${s.plugin}:${s.account}`).sort();
+
+  // the two retired-subject jars are stranded; the current wallet's zai is NOT.
+  assertEquals(mine(strandedJars(current)), [
+    `${retired}:reddit:me`,
+    `${retired}:youtube:default`,
+  ]);
+  assertEquals(strandedJars(current).some((s) => s.subject === current), false);
+
+  // plugin filter narrows to youtube only (the reported case). "youtube" is unique to this
+  // test, so the filtered list is exact.
+  const ytOnly = strandedJars(current, "youtube");
+  assertEquals(ytOnly.length, 1);
+  assertEquals(ytOnly[0].subject, retired);
+  assertEquals(ytOnly[0].plugin, "youtube");
+  assertEquals(ytOnly[0].account, "default");
+  assertEquals(ytOnly[0].count, 1); // one cookie in the fixture jar
+
+  // inverse: relative to the RETIRED subject, the current wallet's zai is the stranded one.
+  assertEquals(strandedJars(retired).some((s) => s.subject === current && s.plugin === "zai"), true);
+  assertEquals(strandedJars(retired).some((s) => s.subject === retired), false);
+});

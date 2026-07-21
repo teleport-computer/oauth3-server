@@ -24,7 +24,7 @@
 
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
 import { configureEgress, egressFetch, egressProxy } from "./egress.ts";
-import { AmbiguousAccountError, deleteJar, getJar, initVault, jarsFor, setJar } from "./vault.ts";
+import { AmbiguousAccountError, deleteJar, getJar, initVault, jarsFor, setJar, strandedJars } from "./vault.ts";
 import { initTokens, listTokens, mint, revoke, type Token, verify, verifyCap } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit } from "./audit.ts";
@@ -529,6 +529,22 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!subj) return json({ error: "unauthorized" }, 401);
     const all = auditLog();
     return json({ audit: subj === "owner" ? all : all.filter((e) => (e.detail as { subject?: string } | undefined)?.subject === subj) });
+  }
+
+  // #132 — make a stranded jar legible. `?subject=<current wallet subject>` classifies every
+  // jar whose subject is NOT the current wallet's as stranded (retired extension wallet /
+  // rotated userKey → new subject → old jars stop refreshing but read as "expired"). Owner-only:
+  // a stranded jar belongs to another subject, so exposing it to a wallet session would cross
+  // the subject isolation line. Owner/subject jar reads for non-owner sessions are tracked
+  // separately (see issue #132). `?plugin=` narrows to one plugin. This is the structured
+  // alternative to mining /api/audit for "the last sync was under a different subject".
+  const stranded = path === "/api/jars/stranded";
+  if (req.method === "GET" && stranded) {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    const current = url.searchParams.get("subject") || "";
+    if (!current) return json({ error: "?subject=<current wallet subject> required" }, 400);
+    const plugin = url.searchParams.get("plugin") || undefined;
+    return json({ current, stranded: strandedJars(current, plugin) });
   }
 
   // The enforced scope-ingredient ledger, public + read-only (RFC 0004 — closure-can't-drift):

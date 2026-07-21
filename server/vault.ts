@@ -167,3 +167,26 @@ export function allJars(): { subject: string; plugin: string; account: string; j
     return { subject, plugin, account, jar: e.jar };
   });
 }
+
+// #132 — make a stranded jar legible. A jar is "stranded" when it exists under a subject
+// the current wallet no longer uses (e.g. a retired extension wallet's userKey derived a
+// different subject; every jar synced under it stops refreshing but is NOT "expired"). Today
+// that reads identically to "never synced" / "cookies expired"; this is the structured seam
+// that distinguishes the two so the operator/dashboard/popup can surface a re-sync instead of
+// a generic failure. Owner-scoped at the handler (a subject must not see another identity's
+// jars); the primitive itself is subject-agnostic and unit-testable in isolation.
+export function strandedJars(
+  currentSubject: string,
+  plugin?: string,
+): { subject: string; plugin: string; account: string; updatedAt: number; count: number }[] {
+  return Object.entries(store)
+    .filter(([k]) => {
+      const p = parseKey(k);
+      return p.subject !== currentSubject && (plugin === undefined || p.plugin === plugin);
+    })
+    .map(([k, e]) => {
+      const p = parseKey(k);
+      return { subject: p.subject, plugin: p.plugin, account: p.account, updatedAt: e.updatedAt, count: Object.keys(e.jar).length };
+    })
+    .sort((a, b) => a.plugin.localeCompare(b.plugin) || a.subject.localeCompare(b.subject) || a.account.localeCompare(b.account));
+}
