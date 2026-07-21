@@ -19,6 +19,11 @@ export const SCOPE_INGREDIENTS: Record<string, { plugin: string; reads: string[]
       label:
         "read-only · your Reddit account identity (username) and karma (comment + link) · not your saved posts, feed, votes, or messages",
     },
+    "codex:usage-read": {
+      plugin: "codex",
+      reads: ["quota"],
+      label: "read-only · your ChatGPT/Codex 5-hour and weekly usage windows · not prompts, responses, or account credentials",
+    },
     // #88: novel consumed scopes seeded by the composable utilities (feedling, calendar-share).
     // Each maps to a real read chokepoint in handler.ts, so a token carrying the cap is
     // confined exactly like otter:live-follow / reddit:karma — the consumed claim is enforced,
@@ -79,6 +84,10 @@ export const PLUGIN_CAPABILITIES: Record<string, { plugin: string; statement: st
     plugin: "reddit",
     statement:
       "CAN read your saved posts and comments (and each item's full body/url), your account identity and karma (comment + link), and a logged-in screenshot of reddit.com. CANNOT save, vote, post, comment, or edit.",
+  },
+  codex: {
+    plugin: "codex",
+    statement: "CAN read your ChatGPT/Codex plan usage windows and reset times. CANNOT read prompts, responses, or expose the bearer credential.",
   },
   nytimes: {
     plugin: "nytimes",

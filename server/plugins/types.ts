@@ -19,6 +19,8 @@ export interface PluginListOptions {
   pageSize?: number;
 }
 
+export interface PluginTokenSource { origin: string; localStorage: string[]; jarKey: string; }
+
 // #98: the amazon cart-substitute write. removeAsin is the active-cart line to remove;
 // addAsin is the comparable replacement added at `qty`. Server-side enforced (price band +
 // same category + qty bound) before the network write.
@@ -56,6 +58,7 @@ export interface Plugin {
   id: string; // url-safe, e.g. "otter"
   label: string; // human, e.g. "ShapeRotator (Otter.ai)"
   cookieDomains: string[]; // extension grabs the WHOLE jar for these, e.g. [".otter.ai"]
+  tokenSource?: PluginTokenSource;
   renderUrl?: string; // page to load for /screenshot; defaults to https://www.<cookieDomain>
   loggedIn(jar: Jar): boolean; // cheap presence check on a key cookie
   // Synchronous, offline account-id derivation from the jar (#111): the vault keys a jar
@@ -71,6 +74,7 @@ export interface Plugin {
   // username + karma breakdown). The narrow surface behind a scope ingredient like
   // `reddit:karma`. Gated at the handler's read chokepoint (readKind "account") like /items.
   account?(jar: Jar): Promise<PluginAccount>;
+  quota?(jar: Jar): Promise<unknown>;
   // Optional live-follow surface: the currently-live item's recent segments (with
   // monotonic `order` for incremental polling) plus any shared-screen frames.
   live?(jar: Jar, after: number): Promise<unknown>;
