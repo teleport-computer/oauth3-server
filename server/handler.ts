@@ -1003,13 +1003,18 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "quota", bearer); if (denied) return denied;
     const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined);
+    if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     try {
       const data = await plugin.quota(jar);
-      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
-      await audit("quota", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
+      if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
+      await audit("quota", {
+        plugin: plugin.id,
+        subject: subj,
+        by: t ? (t.app || t.subject || "token") : "owner",
+      });
       return json({ plugin: plugin.id, data });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);

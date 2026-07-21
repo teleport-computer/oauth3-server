@@ -12,6 +12,7 @@ import { configureZai, zaiPlugin } from "./zai.ts";
 import handler from "../handler.ts";
 import { mint } from "../tokens.ts";
 import { recordTokenUse } from "../stepup.ts";
+import { setJar } from "../vault.ts";
 
 const OWNER = "test-owner-secret";
 const JAR = { zai_token: "ey.fake.bearer" };
@@ -131,6 +132,19 @@ Deno.test("zai usage: zai:usage-read-scoped token reads quota", async () => {
   const r = await call("GET", "/api/zai/quota", { bearer: t.token });
   assertEquals(r.status, 200);
   assertEquals((await r.json()).data.fiveHourPct, 3);
+});
+
+Deno.test("zai usage: owner token is bound to subject A and cannot be retargeted to B", async () => {
+  await setJar("subject-a", "zai", "default", JAR);
+  await setJar("subject-b", "zai", "default", { zai_token: "expired" });
+  const t = await mint("zai", "subject-a", "morning-report", ["zai:usage-read"]);
+  recordTokenUse(t.token, "zai");
+
+  // The route has no caller-controlled subject override: even a hostile `subject=B`
+  // query still resolves the token's immutable subject A. B's expired jar is never read.
+  const r = await call("GET", "/api/zai/quota?subject=subject-b", { bearer: t.token });
+  assertEquals(r.status, 200);
+  assertEquals((await r.json()).data.weeklyPct, 32);
 });
 
 Deno.test("zai usage: /api/scopes lists zai:usage-read ingredient", async () => {

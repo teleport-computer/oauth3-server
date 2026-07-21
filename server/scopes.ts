@@ -56,6 +56,7 @@ export const SCOPE_INGREDIENTS: Record<string, { plugin: string; reads: string[]
       reads: [],
       label:
         "write · substitute ONE cart line — remove an ASIN, add ONE comparable ASIN within a price band and the same category · CANNOT check out, add arbitrary items, change address/payment, raise quantity, or read your cart/order history",
+    },
     // #76: the first usage/metering scope. A token confined to the /quota read chokepoint —
     // your z.ai GLM Coding Plan usage numbers, nothing that touches the key or coding traffic.
     "zai:usage-read": {
