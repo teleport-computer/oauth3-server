@@ -15,6 +15,7 @@
 //   POST   /api/connect/:requestId/approve|deny  owner_secret — the user's decision
 //   GET    /approve/:requestId                HTML approval screen
 //   GET    /api/:plugin/account              scoped token OR owner — account-level data (identity + karma)
+//   GET    /api/:plugin/quota                scoped token OR owner — provider usage/quota numbers
 //   GET    /api/:plugin/items[/:id]           scoped token OR owner — read
 //        list (/items)    → {plugin, items:[{id,title,date?,meta?}], data:items}  (prefer `items`; `data` is a back-compat alias)
 //        one   (/items/:id) → {plugin, data:<item>}
@@ -44,6 +45,7 @@ import { allCredentialIds, credentialsFor, initPasskeys, passkeyChallenge, verif
 import { consumeState, enabledProviders, githubAuthUrl, githubEnv, githubExchange, googleAuthUrl, googleEnv, googleExchange, newState } from "./oidc.ts";
 import { configureOtter } from "./plugins/otter.ts";
 import { configureReddit } from "./plugins/reddit.ts";
+import { configureCodex } from "./plugins/codex.ts";
 import { amazonPlugin, configureAmazon } from "./plugins/amazon.ts";
 import type { Jar, SubstituteOp } from "./plugins/types.ts";
 import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.ts";
@@ -90,6 +92,7 @@ async function init(env: Record<string, string>, dataDir: string) {
   configureOtter(env);
   configureReddit(env);
   configureAmazon(env);
+  configureCodex(env);
   await initListings(dataDir);
   await initEval(dataDir);
   ownerSecret = env.OWNER_SECRET || env.OAUTH3_OWNER_SECRET || env.EXT_SHARED_SECRET || "";
@@ -434,6 +437,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return json({
       plugins: allPlugins().map((p) => ({
         id: p.id, label: p.label, cookieDomains: p.cookieDomains, account: !!p.account,
+        ...(p.tokenSource ? { tokenSource: p.tokenSource } : {}),
         // #111: one identity may hold several accounts per plugin — surface them all.
         jars: subj ? jarsFor(subj, p.id) : [],
       })),
@@ -997,6 +1001,28 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       await audit("account", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, account: data });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  const quota = path.match(/^\/api\/([a-z0-9-]+)\/quota$/);
+  if (req.method === "GET" && quota) {
+    const plugin = getPlugin(quota[1]);
+    if (!plugin) return json({ error: "unknown plugin" }, 404);
+    if (!plugin.quota) return json({ error: `${plugin.id} has no quota view` }, 404);
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verify(bearer, plugin.id);
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, plugin.id, "quota", bearer); if (denied) return denied;
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    if (!plugin.loggedIn(rj.jar)) return json({ error: "jar present but not logged in" }, 409);
+    try {
+      const data = await plugin.quota(rj.jar);
+      if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
+      await audit("quota", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
+      return json({ plugin: plugin.id, data });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
     }

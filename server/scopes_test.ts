@@ -149,7 +149,7 @@ Deno.test("pluginCapabilities: a CAN/CANNOT statement for every in-tree plugin",
   const all = pluginCapabilities();
   assertEquals(
     all.map((p) => p.plugin).sort(),
-    ["amazon", "google-calendar", "nytimes", "otter", "reddit", "twitter", "youtube"],
+    ["amazon", "codex", "google-calendar", "nytimes", "otter", "reddit", "twitter", "youtube"],
   );
   for (const p of all) {
     assert(p.statement.length > 0, `${p.plugin} has a statement`);
