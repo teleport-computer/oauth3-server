@@ -28,7 +28,11 @@ export async function initTokens(dir: string): Promise<void> {
   catch (e) { if (!(e instanceof Deno.errors.NotFound)) throw e; }
 }
 
-export async function mint(plugin: string, subject?: string, app?: string, caps?: string[], account?: string): Promise<Token> {
+// #131: a token MUST carry a subject. `subject` is REQUIRED (compile-time guard for every caller)
+// and empty strings are rejected at runtime — no subjectless token can be created here. The read
+// side (handler `jarSubject`) still defends against any subjectless token persisted from before.
+export async function mint(plugin: string, subject: string, app?: string, caps?: string[], account?: string): Promise<Token> {
+  if (!subject) throw new Error("mint: subject is required (a token must be bound to a subject)")
   const token = `tok-${plugin}-${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
   const t: Token = { token, plugin, subject, app, ...(caps?.length ? { caps } : {}), ...(account ? { account } : {}), createdAt: Date.now() };
   tokens[token] = t;
