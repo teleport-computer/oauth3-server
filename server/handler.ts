@@ -96,6 +96,15 @@ function json(obj: unknown, status = 200): Response {
     headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
   });
 }
+// #131: a scoped token MUST carry a subject. The old `t.subject ?? "owner"` silently read the
+// OWNER's (usually stale) jar and then blamed the user's cookies — the single biggest cause of
+// bogus "app is broken" reports. No fallback: reject a subjectless token. `t` is null only on the
+// owner-authenticated path (every caller 401s when `!isOwner(req) && !t`), so owner stays correct.
+function jarSubject(t: Token | null): string | Response {
+  if (!t) return "owner";
+  if (!t.subject) return json({ error: "token has no subject — remint the token with a subject (#131)" }, 400);
+  return t.subject;
+}
 function html(body: string): Response {
   return new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
@@ -702,7 +711,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "screenshot", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
@@ -731,7 +741,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verifyCap(bearer, plugin.id, "jar");
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
     await audit("jar.release", { plugin: plugin.id, subject: subj, count: Object.keys(jar).length, by: t ? (t.app || t.subject || "token") : "owner" });
@@ -749,7 +760,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "feed", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
@@ -807,7 +819,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "live", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
@@ -832,7 +845,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "frame", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
@@ -858,7 +872,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "items", bearer); if (denied) return denied;
     // A scoped token reads its own subject's jar; the owner secret reads owner's.
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
@@ -896,7 +911,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "account", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const jar = getJar(subj, plugin.id);
     if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
@@ -929,7 +945,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       await audit("google-calendar.event.edit.denied", { eventId, reason: "unauthorized" });
       return json({ error: `unauthorized — token must carry ${cap}` }, 401);
     }
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const by = t ? (t.app || t.subject || "token") : "owner";
     const body = await req.json().catch(() => null) as { changes?: unknown } | null;
     const jar = getJar(subj, "google-calendar");
