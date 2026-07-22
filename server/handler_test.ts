@@ -2,7 +2,7 @@
 // Tests AC1-AC5 from RFC 0003 issue #23: layer-1 listing gate.
 
 import handler from "./handler.ts";
-import { mint } from "./tokens.ts";
+import { initTokens, mint } from "./tokens.ts";
 import { assertEquals, assertExists } from "jsr:@std/assert@~1.0.0";
 
 const TEST_ENV = {
@@ -197,13 +197,18 @@ Deno.test("handler returns signedIn:false for /api/me without auth", async () =>
   if (body.signedIn !== false) throw new Error(`expected signedIn:false, got ${body.signedIn}`);
 });
 
-// #131: a scoped token with NO subject must be REJECTED, not silently served the owner's jar.
-// The /api/:plugin/jar path (verifyCap "jar", no gateRead) isolates jarSubject cleanly.
+// #131: the read side must REJECT a subjectless token (400), not silently serve the owner's jar.
+// mint() can no longer create one, so we inject a LEGACY subjectless token (as could still sit in
+// a pre-fix vault) straight into the store via initTokens. The /api/:plugin/jar path (verifyCap
+// "jar", no gateRead) isolates jarSubject cleanly.
 Deno.test("handler: #131 subjectless token is rejected, not silently owner", async () => {
-  await callHandler("GET", "/api/health"); // triggers init() so the token store exists
-  const noSubj = await mint("reddit", undefined, "testapp", ["jar"]);
+  await callHandler("GET", "/api/health"); // triggers init() so the handler is ready
+  const dir = await Deno.makeTempDir();
+  const legacy = { token: "tok-reddit-legacy", plugin: "reddit", app: "old", caps: ["jar"], createdAt: 1 }; // NO subject
+  await Deno.writeTextFile(`${dir}/tokens.json`, JSON.stringify({ [legacy.token]: legacy }));
+  await initTokens(dir); // load the legacy subjectless token into the shared store
   const r1 = await callHandler("GET", "/api/reddit/jar", undefined, {
-    Authorization: `Bearer ${noSubj.token}`,
+    Authorization: `Bearer ${legacy.token}`,
   });
   assertEquals(r1.status, 400); // was: silently read the owner's (stale) jar
   // @ts-ignore
