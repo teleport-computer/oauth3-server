@@ -2,6 +2,7 @@
 // Tests AC1-AC5 from RFC 0003 issue #23: layer-1 listing gate.
 
 import handler from "./handler.ts";
+import { mint } from "./tokens.ts";
 import { assertEquals, assertExists } from "jsr:@std/assert@~1.0.0";
 
 const TEST_ENV = {
@@ -194,4 +195,24 @@ Deno.test("handler returns signedIn:false for /api/me without auth", async () =>
   if (res.status !== 200) { await res.body?.cancel(); throw new Error(`expected 200, got ${res.status}`); }
   const body = await res.json();
   if (body.signedIn !== false) throw new Error(`expected signedIn:false, got ${body.signedIn}`);
+});
+
+// #131: a scoped token with NO subject must be REJECTED, not silently served the owner's jar.
+// The /api/:plugin/jar path (verifyCap "jar", no gateRead) isolates jarSubject cleanly.
+Deno.test("handler: #131 subjectless token is rejected, not silently owner", async () => {
+  await callHandler("GET", "/api/health"); // triggers init() so the token store exists
+  const noSubj = await mint("reddit", undefined, "testapp", ["jar"]);
+  const r1 = await callHandler("GET", "/api/reddit/jar", undefined, {
+    Authorization: `Bearer ${noSubj.token}`,
+  });
+  assertEquals(r1.status, 400); // was: silently read the owner's (stale) jar
+  // @ts-ignore
+  assertEquals(String(r1.json?.error || "").includes("no subject"), true);
+
+  // A token WITH a subject gets past the check to that subject's own (here absent) jar → 409.
+  const withSubj = await mint("reddit", "u-test-subject", "testapp", ["jar"]);
+  const r2 = await callHandler("GET", "/api/reddit/jar", undefined, {
+    Authorization: `Bearer ${withSubj.token}`,
+  });
+  assertEquals(r2.status, 409);
 });
