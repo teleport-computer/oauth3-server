@@ -116,10 +116,12 @@ an expired jar as `409`, an unknown plugin as `404`, etc.
 
 ### `GET /api/:plugin/screenshot`
 - Auth: `token` (for `:plugin`) **or** `owner`. Renders a logged-in page via the configured
-  Browser SPI (`BROWSER_SPI_URL`) using the **same** sealed jar as `/items`.
+  Browser SPI (`BROWSER_SPI_URL`, authenticated with the `BROWSER_SPI_SECRET` bearer — both must
+  ride `env_passthrough`) using the **same** sealed jar as `/items`.
 - Query: `?url=<target>` (defaults to the plugin's `renderUrl`, else `https://www.<first cookieDomain>`).
 - Response `200`: `{ "plugin", "url", …shot fields }` (whatever the Browser SPI returns)
 - `404` unknown plugin · `401` unauthorized · `409` no jar / not logged in · `502` render error
+  (incl. `browser SPI /session 401: unauthorized` when `BROWSER_SPI_SECRET` is missing/wrong — issue #14)
 
 ## Audit
 
