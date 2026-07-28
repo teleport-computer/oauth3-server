@@ -1,6 +1,6 @@
 # Issue #87 — contextual-authorization feedback loop
 
-Tier 2 walked flow, run against the deployed staging URL after commit `18ce7b7e08a2af96b3e08e8e44bcfea48b7b8a11`.
+Tier 2 walked flow, run against the deployed staging URL after commit `828c8756a31f1dfb1837cdd6a1dd7d08d3c7f8aa` (behavior identical to the preceding code commit; this head adds the committed evidence).
 
 1. Signed in through `/api/login` as the rig identity `u-swarm` (`u-eaf13541f186c7c5f466dc04e2e5da4b`) and opened `/oauth3/dashboard`. The dashboard rendered the real Contextual authorization panel from `GET /api/promote`, including `used 1 of 1 granted reads` and the enforced label from `GET /api/scopes`.
 2. Clicked `tighten to amazon:cart-read`. The real endpoint revoked the broad token and re-minted the same app with `amazon:cart-read`; the dashboard then rendered `tightened ✓` and the enforced Amazon cart sentence.
