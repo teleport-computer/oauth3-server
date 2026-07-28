@@ -6,101 +6,53 @@
 <title>oauth3 — deploy apps your users can verify</title>
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="apple-touch-icon" href="icon.png">
+<link rel="stylesheet" href="watermelon.css">
 <meta name="description" content="Deploy an app to a TEE pod that proves to everyone who opens it that it does exactly what you say. People delegate any account to the apps they choose, scoped and revocable. Live demo: Otter Copilot." />
 <meta property="og:title" content="oauth3" />
 <meta property="og:description" content="Deploy an app to a TEE pod that proves to everyone who opens it that it does what you say. People delegate any account, scoped and revocable. Live demo: Otter Copilot." />
 <meta property="og:type" content="website" />
 <style>
-  :root {
-    --ink: #16140f; --paper: #f4f0e7; --panel: #ece6d9; --faint: #6b6557;
-    --rule: #d8d2c4; --accent: #b4441f; --green: #3f7a3f;
-    --gutter: clamp(20px, 7vw, 130px);
-    --mono: ui-monospace, SFMono-Regular, Menlo, "Cascadia Code", monospace;
-  }
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
-  body { margin: 0; background: var(--paper); color: var(--ink);
-    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
-    font-size: 18px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
-  a { color: inherit; }
-  .wrap { max-width: 820px; margin: 0 auto; padding: 0 var(--gutter); }
-
-  header.top { display: flex; justify-content: space-between; align-items: center;
-    padding: 26px var(--gutter) 0; font-family: var(--mono); font-size: 12px;
-    letter-spacing: .12em; text-transform: lowercase; color: var(--faint); }
-  header.top .brand { color: var(--ink); font-weight: 600; letter-spacing: .04em; }
-  header.top a { text-decoration: none; border-bottom: 1px solid var(--accent); color: var(--ink); }
-
-  .hero { padding: 7vh 0 0; }
-  h1 { font-weight: 400; font-size: clamp(52px, 11vw, 104px); line-height: .9;
-    letter-spacing: -.02em; margin: 0; text-transform: lowercase; }
-  .tagline { font-size: clamp(20px, 3vw, 27px); line-height: 1.25; margin: 22px 0 0; max-width: 18em; }
-  .tagline b { font-weight: 600; }
-  .tagline.sub { font-size: clamp(17px, 2.4vw, 21px); color: var(--faint); margin-top: 14px; max-width: 22em; }
-  .tagline.sub b { color: var(--ink); }
-
-  section.block { padding: 52px 0 0; }
-  h2 { font-family: var(--mono); font-weight: 500; font-size: 12px; letter-spacing: .18em;
-    text-transform: lowercase; color: var(--accent); margin: 0 0 16px; }
-  p { margin: 0 0 1.1em; } strong { font-weight: 600; } em { font-style: italic; }
-  ul { margin: 0 0 1em; padding-left: 1.1em; } li { margin: 0 0 .4em; }
-
-  /* live app cards */
+  /* page-specific: live-app cards, two-column blocks, link nav */
   .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   @media (max-width: 620px) { .cards { grid-template-columns: 1fr; } }
-  .card { display: block; text-decoration: none; background: var(--panel);
-    border: 1px solid var(--rule); border-radius: 14px; padding: 20px 22px;
-    transition: border-color .15s, transform .15s; }
-  .card:hover { border-color: var(--accent); transform: translateY(-2px); }
-  .card .lbl { font-family: var(--mono); font-size: 11px; letter-spacing: .1em;
-    text-transform: uppercase; color: var(--accent); }
-  .card .name { font-size: 22px; margin: 6px 0 4px; }
-  .card .desc { font-size: 14.5px; color: var(--faint); line-height: 1.4; }
-  .card .go { font-family: var(--mono); font-size: 12px; color: var(--accent); margin-top: 10px; }
-  .podnote { font-size: 14.5px; color: var(--faint); margin-top: 14px; }
-  .podnote code { font-family: var(--mono); font-size: 12.5px; }
+  a.card { display: block; text-decoration: none; color: var(--text); transition: transform .15s, box-shadow .15s; }
+  a.card:hover { transform: translate(-2px, -2px); box-shadow: 5px 5px 0 var(--ink2); }
+  a.card .lbl { font: 500 11px/1 var(--mono); letter-spacing: .12em; text-transform: lowercase; color: var(--ink2); }
+  a.card .name { font: 800 20px/1.2 var(--cond); text-transform: uppercase; letter-spacing: .02em; margin: 8px 0 6px; color: var(--text); }
+  a.card .desc { font-size: 14.5px; line-height: 1.45; color: var(--faint); }
+  a.card .desc strong { color: var(--text); }
+  a.card .go { font: 500 12px var(--mono); color: var(--i1-text); margin-top: 12px; letter-spacing: .04em; }
+  .podnote { font-size: 14.5px; color: var(--faint); margin-top: 16px; }
+  .podnote strong { color: var(--text); }
+  .podnote code { font-size: 12.5px; }
 
-  pre { background: var(--ink); color: #ece6d9; border-radius: 12px; padding: 16px 18px;
-    overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.65; margin: 8px 0 0; }
-  pre .c { color: #9b9482; } pre .a { color: #e6915f; }
-  code { font-family: var(--mono); font-size: .85em; background: var(--panel); padding: 1px 5px; border-radius: 4px; }
-
-  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
   @media (max-width: 620px) { .two { grid-template-columns: 1fr; } }
-  .two h3 { font-size: 17px; margin: 0 0 6px; }
-  .pathtag { font-family: var(--mono); font-size: 11px; letter-spacing: .08em;
-    text-transform: uppercase; color: var(--accent); }
+  .two h3 { font-size: 18px; }
+  .pathtag { font: 500 11px/1 var(--mono); letter-spacing: .14em; text-transform: lowercase; color: var(--ink2); display: block; margin-bottom: 8px; }
 
-  table { width: 100%; border-collapse: collapse; font-size: 15px; }
-  td, th { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--rule); vertical-align: top; }
-  th { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
-  td a { border-bottom: 1px solid var(--accent); text-decoration: none; }
-
-  .links { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px;
-    font-family: var(--mono); font-size: 13px; text-transform: lowercase; }
-  .links a { text-decoration: none; border: 1px solid var(--rule); border-radius: 999px; padding: 7px 14px; }
-  .links a:hover { border-color: var(--ink); background: var(--ink); color: var(--paper); }
-
-  footer { margin-top: 64px; padding: 22px 0 56px; border-top: 1px solid var(--rule);
-    font-family: var(--mono); font-size: 12px; color: var(--faint); text-transform: lowercase; letter-spacing: .06em; }
+  .links { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 18px; }
+  .links a { font: 500 13px var(--mono); text-transform: lowercase; color: var(--i1-text);
+    text-decoration: none; border: 1px solid var(--rule); padding: 7px 14px; border-radius: 999px; }
+  .links a:hover { border-color: var(--ink1); background: var(--wash1); color: var(--ink1); }
 </style>
 </head>
 <body>
   <header class="top">
-    <span class="brand"><img src="icon.png" alt="" width="22" height="22" style="vertical-align:-5px;margin-right:7px">oauth3</span>
-    <a href="https://pod.dstack.soc1024.com/oauth3/login">sign in ↗</a>
+    <span class="wordmark"><img src="icon.png" alt="">oauth<b>3</b></span>
+    <a class="signin" href="https://pod.dstack.soc1024.com/oauth3/login">sign in ↗</a>
   </header>
 
   <main class="wrap">
     <section class="hero">
-      <h1>oauth3</h1>
+      <h1 class="display">oauth3</h1>
       <p class="tagline">Deploy an app that <b>proves to everyone who opens it</b> that it does exactly what you say.</p>
       <p class="tagline sub">And hand any account you have to the <b>apps and agents you choose</b> &mdash; as much or as little as you want.</p>
     </section>
 
     <!-- LIVE first: the actual demo on Andrew's pod -->
     <section class="block">
-      <h2>try it — live</h2>
+      <h2 class="k">try it — live</h2>
       <div class="cards">
         <a class="card" href="https://pod.dstack.soc1024.com/otterscope/">
           <div class="lbl">example app · live</div>
@@ -127,17 +79,17 @@
           <div class="go">sign in →</div>
         </a>
       </div>
-      <p class="podnote">The instance runs on <strong>Andrew&rsquo;s personal TEE pod</strong> — a <a href="https://pod.dstack.soc1024.com/">dstack tee-daemon</a> at <code>pod.dstack.soc1024.com</code>. That pod <em>is</em> the oauth3 instance: the sealed room your cookies live in; apps read through it with a scoped token. Curious how the in-TEE browser behind &ldquo;Login with everything&rdquo; works? <a href="browser-container.html">See the infographic →</a>.</p>
+      <p class="podnote">The instance runs on <strong>Andrew&rsquo;s personal TEE pod</strong> — a <a class="u" href="https://pod.dstack.soc1024.com/">dstack tee-daemon</a> at <code>pod.dstack.soc1024.com</code>. That pod <em>is</em> the oauth3 instance: the sealed room your cookies live in; apps read through it with a scoped token. Curious how the in-TEE browser behind &ldquo;Login with everything&rdquo; works? <a class="u" href="browser-container.html">See the infographic →</a>.</p>
     </section>
 
     <section class="block">
-      <h2>what it is</h2>
-      <p>You build an app that reads people&rsquo;s accounts &mdash; watch history, meeting notes, whatever &mdash; push it to your pod and share the link, same as Vercel. The difference: it runs in an <strong>attested enclave</strong>. Where this is headed: anyone who opens the link can verify the running code is exactly what you published, and that it touches only the accounts and scopes you declared. You ask for access in plain words &mdash; <em>&ldquo;reads your watch history, nothing else&rdquo;</em> &mdash; and the deployment backs the claim. People say yes because your app is <strong>legible</strong>, not because they trust you. And you never hold their credential: it stays sealed in their instance, and your app reads through a scoped token. <a href="roadmap-2026-06-25.html" style="border-bottom:1px solid var(--accent);text-decoration:none">where the proof story is going &rarr;</a></p>
+      <h2 class="k">what it is</h2>
+      <p>You build an app that reads people&rsquo;s accounts &mdash; watch history, meeting notes, whatever &mdash; push it to your pod and share the link, same as Vercel. The difference: it runs in an <strong>attested enclave</strong>. Where this is headed: anyone who opens the link can verify the running code is exactly what you published, and that it touches only the accounts and scopes you declared. You ask for access in plain words &mdash; <em>&ldquo;reads your watch history, nothing else&rdquo;</em> &mdash; and the deployment backs the claim. People say yes because your app is <strong>legible</strong>, not because they trust you. And you never hold their credential: it stays sealed in their instance, and your app reads through a scoped token. <a class="u" href="roadmap-2026-06-25.html">where the proof story is going &rarr;</a></p>
       <p>For the people who use your app, the same machinery reads the other way: a handful of sites offer OAuth, but everywhere else, letting an app use your account is all-or-nothing &mdash; hand over your password, or your whole cookie jar. oauth3 turns any account you can log into into one you can <strong>delegate</strong>: pick what an app gets, a single read or the run of the account, and change your mind whenever.</p>
     </section>
 
     <section class="block">
-      <h2>how it works</h2>
+      <h2 class="k">how it works</h2>
       <ul>
         <li>your <strong>cookie jar</strong> for a site goes into the instance (via the extension, or one paste) — sealed, never handed out;</li>
         <li>an app asks to read that site → you <strong>approve</strong> once → it gets a scoped token;</li>
@@ -146,12 +98,12 @@
     </section>
 
     <section class="block">
-      <h2>use it</h2>
+      <h2 class="k">use it</h2>
       <div class="two">
         <div>
           <span class="pathtag">with the extension</span>
           <h3>one click</h3>
-          <p>Install <a href="https://github.com/teleport-computer/oauth3-extension" style="border-bottom:1px solid var(--accent);text-decoration:none">oauth3-extension</a>. On a supported site, open it and hit <strong>Save</strong> — the jar syncs and stays fresh on its own.</p>
+          <p>Install <a class="u" href="https://github.com/teleport-computer/oauth3-extension">oauth3-extension</a>. On a supported site, open it and hit <strong>Save</strong> — the jar syncs and stays fresh on its own.</p>
         </div>
         <div>
           <span class="pathtag">no extension — in your terminal</span>
@@ -166,8 +118,8 @@ oauth3 read  otter            <span class="c"># real data, no cookie</span></pre
     </section>
 
     <section class="block">
-      <h2>for developers</h2>
-      <p>Build an app with the <a href="https://github.com/teleport-computer/oauth3-sdk" style="border-bottom:1px solid var(--accent);text-decoration:none">SDK</a>: <code>connect()</code> for the user&rsquo;s approval, then <code>list()</code> / <code>fetch()</code> with the token. New sites are an adapter template in the <a href="https://github.com/teleport-computer/oauth3-server" style="border-bottom:1px solid var(--accent);text-decoration:none">server</a>. The raw API lives at the instance&rsquo;s <code>/oauth3/api</code>.</p>
+      <h2 class="k">for developers</h2>
+      <p>Build an app with the <a class="u" href="https://github.com/teleport-computer/oauth3-sdk">SDK</a>: <code>connect()</code> for the user&rsquo;s approval, then <code>list()</code> / <code>fetch()</code> with the token. New sites are an adapter template in the <a class="u" href="https://github.com/teleport-computer/oauth3-server">server</a>. The raw API lives at the instance&rsquo;s <code>/oauth3/api</code>.</p>
       <nav class="links">
         <a href="https://github.com/teleport-computer/oauth3-server">server</a>
         <a href="https://github.com/teleport-computer/oauth3-extension">extension</a>
@@ -177,16 +129,19 @@ oauth3 read  otter            <span class="c"># real data, no cookie</span></pre
     </section>
 
     <section class="block">
-      <h2>why trust it</h2>
-      <p>The instance runs inside a TEE — a sealed room the operator can&rsquo;t see into. The host is the <a href="https://pod.dstack.soc1024.com/">tee-daemon</a>, which attests the exact code each app runs; an app (or the extension) can <strong>pin that measurement</strong> before trusting an instance — you trust the code, not the operator. A teleport experiment, with TinyCloud.</p>
+      <h2 class="k">why trust it</h2>
+      <p>The instance runs inside a TEE — a sealed room the operator can&rsquo;t see into. The host is the <a class="u" href="https://pod.dstack.soc1024.com/">tee-daemon</a>, which attests the exact code each app runs; an app (or the extension) can <strong>pin that measurement</strong> before trusting an instance — you trust the code, not the operator. A teleport experiment, with TinyCloud.</p>
     </section>
 
     <section class="block">
-      <h2>where it&rsquo;s going</h2>
-      <p>A dated snapshot of the roadmap thinking — the one idea (you own the attenuation dial), the three authorization layers, and the RFCs across oauth3 and the tee-daemon: <a href="roadmap-2026-06-25.html" style="border-bottom:1px solid var(--accent);text-decoration:none"><strong>roadmap snapshot, 2026-06-25</strong></a>.</p>
+      <h2 class="k">where it&rsquo;s going</h2>
+      <p>A dated snapshot of the roadmap thinking — the one idea (you own the attenuation dial), the three authorization layers, and the RFCs across oauth3 and the tee-daemon: <a class="u" href="roadmap-2026-06-25.html"><strong>roadmap snapshot, 2026-06-25</strong></a>.</p>
     </section>
 
-    <footer>oauth3 · running on a dstack tee-daemon · <a href="roadmap-2026-06-25.html" style="color:var(--faint)">roadmap</a> · <a href="https://github.com/teleport-computer/oauth3-server" style="color:var(--faint)">source</a></footer>
+    <footer>
+      <div class="halftone"></div>
+      <p class="ftxt">oauth3 · running on a dstack tee-daemon · <a href="roadmap-2026-06-25.html">roadmap</a> · <a href="https://github.com/teleport-computer/oauth3-server">source</a></p>
+    </footer>
   </main>
 </body>
 </html>
