@@ -183,6 +183,35 @@ Deno.test("handler: audit log records connect.refuse (AC5)", async () => {
   assertEquals(status, 200);
 });
 
+Deno.test("handler: tighten revokes broad token and re-mints enforced ingredient", async () => {
+  const app = `tighten-${crypto.randomUUID()}`;
+  const minted = await ownerReq("POST", "/api/tokens", { plugin: "reddit", app });
+  assertEquals(minted.status, 200);
+  // @ts-ignore
+  const oldToken = minted.json.token;
+  const tightened = await ownerReq(`POST`, `/api/tokens/${encodeURIComponent(oldToken)}/tighten`, { ingredient: "reddit:karma" });
+  assertEquals(tightened.status, 200);
+  // @ts-ignore
+  assertEquals(tightened.json.scope, "reddit:karma");
+  // @ts-ignore
+  assertExists(tightened.json.label);
+  // @ts-ignore
+  assertEquals(tightened.json.revoked, oldToken);
+  // @ts-ignore
+  assertExists(tightened.json.token);
+  const listed = await ownerReq("GET", "/api/tokens");
+  // @ts-ignore
+  const old = listed.json.tokens.find((t: { token: string }) => t.token === oldToken);
+  // @ts-ignore
+  const fresh = listed.json.tokens.find((t: { token: string }) => t.token === tightened.json.token);
+  assertExists(old);
+  assertExists(fresh);
+  // @ts-ignore
+  assertExists(old.revokedAt);
+  // @ts-ignore
+  assertEquals(fresh.caps, ["reddit:karma"]);
+});
+
 console.log("All handler tests passed.");
 
 // --- from #34 (staging-oa-33): generic route/auth smoke tests ---

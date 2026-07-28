@@ -16,6 +16,7 @@ unit-test acceptance below.
 - [ ] No fallback behavior: ambiguity + underivable accounts are explicit errors
 
 ## Implementation surface (against origin/staging)
+
 1. `server/vault.ts` — keyOf→3-part (`subject:plugin:account`); `AmbiguousAccountError`;
    `setJar(s,p,account,jar)`; `getJar(s,p,account?)` (omitted→single|null, >1→throw);
    `deleteJar(s,p,account?)` (same ambiguity rule); `jarsFor(s,p)` replaces `jarStatus`;
@@ -47,3 +48,11 @@ unit-test acceptance below.
 - If staging core-deploy is operator-only on this box → ship the verifiable subset
   (unit tests + the issue's literal acceptance) and comment the staging-transcript step
   back to the operator (scope-down rule). Never fake the transcript.
+
+## Issue #87 — contextual-authorization feedback loop
+
+- [x] Surface real promoter proposals on the signed-in dashboard.
+- [x] Show the enforced scope sentence from `GET /api/scopes`.
+- [x] Revoke the broad token and re-mint a matching registered ingredient.
+- [x] Return the new scope and enforcement label from the tighten endpoint.
+- [ ] Verify the signed-in staging flow and commit Tier 2 evidence.

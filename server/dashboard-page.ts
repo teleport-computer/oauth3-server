@@ -46,6 +46,10 @@ export function dashboardPage(): string {
  .act .verb{color:var(--text)}
  .act .pts{display:inline-flex;gap:6px;flex-wrap:wrap}
  .addrow{margin-top:12px;display:flex;gap:8px;flex-wrap:wrap}
+ .proposal{border-top:1px solid var(--rule);padding:14px 0;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+ .proposal:first-child{border-top:0}
+ .proposal .copy{flex:1 1 20rem}.proposal .copy b{display:block}.proposal .copy .m{display:block;margin-top:5px}
+ .proposal .scope{margin-top:7px;color:var(--i1-text);font-size:13px}
 </style></head><body>
 <header>
   <div class=brand>
@@ -63,6 +67,7 @@ export function dashboardPage(): string {
   <section class=card><b class=title>Sites</b><div id=sites></div></section>
   <section class=card><b class=title>Apps &amp; tokens</b><div id=apps></div></section>
 </div>
+<section class=card><b class=title>Contextual authorization</b><div id=promote><div class=empty>No tightening proposals yet.</div></div></section>
 <section class=card><b class=title>Passkeys &amp; sign-in</b><div id=keys></div>
   <div id=links></div>
   <div class=addrow>
@@ -97,6 +102,13 @@ export function dashboardPage(): string {
  function renderApps(ts){const el=$('apps');const live=ts.filter(t=>!t.revokedAt);
    if(!live.length){el.innerHTML='<div class="empty">No apps connected yet.</div>';return;}
    el.innerHTML=live.map(t=>'<div class=item><span class=name>'+esc(t.app||'(unnamed app)')+'</span><span class=meta><span class=chip>'+esc(t.plugin)+'</span> <span class=m>'+ago(t.createdAt)+'</span></span><button class="btn danger sm" data-token="'+esc(t.token)+'">revoke</button></div>').join('');}
+ function sameReads(a,b){return a.length===b.length&&[...a].sort().join('\0')===[...b].sort().join('\0');}
+ function renderPromote(ps,scopes,ts){const el=$('promote');if(!ps.length){el.innerHTML='<div class="empty">No observed usage to tighten yet.</div>';return;}
+   el.innerHTML=ps.map(p=>{const scope=scopes.find(s=>s.plugin===p.plugin&&sameReads(s.reads,p.proposed_ingredient.reads));
+     const token=ts.filter(t=>!t.revokedAt&&t.plugin===p.plugin&&(t.app||'')===p.app).sort((a,b)=>b.createdAt-a.createdAt)[0];
+     const granted=new Set();ts.filter(t=>!t.revokedAt&&t.plugin===p.plugin&&(t.app||'')===p.app).forEach(t=>{(t.caps||[]).forEach(c=>{const s=scopes.find(x=>x.id===c);(s?s.reads:p.read_universe).forEach(r=>granted.add(r));});if(!t.caps) p.read_universe.forEach(r=>granted.add(r));});
+     const y=granted.size||p.read_universe.length;const button=scope&&token?'<button class="btn sm" data-tighten-token="'+esc(token.token)+'" data-tighten-scope="'+esc(scope.id)+'">tighten to '+esc(scope.id)+'</button>':'<button class="btn quiet sm" disabled>awaiting reviewed scope</button>';
+     return '<div class=proposal><div class=copy><b>'+esc(p.app)+' · '+esc(p.plugin)+'</b><span class=m>used '+p.observed_reads.length+' of '+y+' granted reads · '+p.observations+' observed uses</span>'+(scope?'<div class=scope>Enforced: '+esc(scope.label)+'</div>':'<div class=scope>Proposed: '+esc(p.proposed_ingredient.label)+'</div>')+'</div>'+button+'</div>';}).join('');}
  function renderKeys(ks){$('keys').innerHTML=ks.length?ks.map(k=>'<div class=item><span class=name>passkey</span><span class=meta><span class=m>'+esc(k.id.slice(0,12))+'…</span> <span class=m>'+ago(k.createdAt)+'</span></span></div>').join(''):'<div class="empty">No passkeys yet — add one to sign in on any device.</div>';}
  function renderActs(es){const el=$('acts');if(!es.length){el.innerHTML='<div class="empty">No activity yet.</div>';return;}
    el.innerHTML=es.slice(0,40).map(e=>{const d=e.detail||{};const parts=[];
@@ -109,6 +121,9 @@ export function dashboardPage(): string {
    e.target.disabled=true;e.target.textContent='revoking…';
    try{const r=await fetch('api/tokens/'+encodeURIComponent(t),{method:'DELETE',headers:authH()});if(!r.ok)throw new Error('revoke '+r.status);await load();}
    catch(err){showErr(err.message);e.target.disabled=false;e.target.textContent='revoke';}});
+ $('promote').addEventListener('click',async e=>{const b=e.target.dataset;if(!b||!b.tightenToken)return;e.target.disabled=true;e.target.textContent='tightening…';
+   try{const r=await fetch('api/tokens/'+encodeURIComponent(b.tightenToken)+'/tighten',{method:'POST',headers:{...authH(),'Content-Type':'application/json'},body:JSON.stringify({ingredient:b.tightenScope})});if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.error||'tighten '+r.status);}await load();}
+   catch(err){showErr(err.message);e.target.disabled=false;e.target.textContent='tighten';}});
 
  // Enroll a passkey bound to this signed-in subject.
  $('addpk').addEventListener('click',async()=>{
@@ -154,12 +169,14 @@ export function dashboardPage(): string {
    $('instDot').className='dot '+(h&&h.ready?'ok':'bad');
    let host='';try{host=location.host;}catch(e){}
    $('instText').textContent=(h&&h.ready?'instance ready':'instance unreachable')+' — '+host;
-   const [pl,tk,au,pk]=await Promise.all([
+   const [pl,tk,au,pk,prom,scopeData]=await Promise.all([
      api('api/plugins').then(r=>r.plugins).catch(()=>[]),
      api('api/tokens').then(r=>r.tokens).catch(()=>[]),
      api('api/audit').then(r=>r.audit).catch(()=>[]),
-     api('api/passkeys').then(r=>r.passkeys).catch(()=>[])]);
-   renderSites(pl);renderApps(tk);renderActs(au);renderKeys(pk);
+     api('api/passkeys').then(r=>r.passkeys).catch(()=>[]),
+     api('api/promote'),
+     api('api/scopes')]);
+   renderSites(pl);renderApps(tk);renderActs(au);renderKeys(pk);renderPromote(prom.proposals||[],scopeData.scopes||[],tk);
  }
  if(!tok())location.href='login?return='+encodeURIComponent(location.pathname);else load().catch(e=>showErr(String(e.message||e)));
 </script></body></html>`;
