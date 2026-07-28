@@ -9,7 +9,8 @@
 //   GET    /api/tokens                        owner — list tokens
 //   DELETE /api/tokens/:token                 owner — revoke a token
 //   GET    /api/audit                         owner — audit log
-//   GET    /api/promote                       owner — proposed scope ingredients from observed reads
+//   GET    /api/promote                       signed-in user — proposed scope ingredients from observed reads
+//   POST   /api/tokens/:token/tighten          signed-in user — revoke and re-mint with a named ingredient
 //   GET    /api/scopes                        public — enforced scope-ingredient ledger + app consumes/offers (#88)
 //   GET    /api/scopes/:id                    public — one enforced ingredient (404 if unknown)
 //   GET    /scopes                            public — the composable-utilities panel (rendered view of /api/scopes, #88)
@@ -551,6 +552,30 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const all = listTokens();
     return json({ tokens: subj === "owner" ? all : all.filter((t) => t.subject === subj) });
   }
+  const tighten = path.match(/^\/api\/tokens\/(.+)\/tighten$/);
+  if (req.method === "POST" && tighten) {
+    const acting = subjectOf();
+    if (!acting) return json({ error: "unauthorized" }, 401);
+    const oldToken = decodeURIComponent(tighten[1]);
+    const old = listTokens().find((t) => t.token === oldToken);
+    if (!old || old.revokedAt) return json({ error: "token not found or already revoked" }, 404);
+    if (acting !== "owner" && old.subject !== acting) return json({ error: "token belongs to another subject" }, 403);
+    const body = await req.json().catch(() => null) as { ingredient?: unknown } | null;
+    const ingredient = typeof body?.ingredient === "string" ? scopeIngredient(body.ingredient) : undefined;
+    if (!ingredient) return json({ error: "ingredient must name an enforced scope" }, 400);
+    if (ingredient.plugin !== old.plugin) return json({ error: "ingredient does not match token plugin" }, 400);
+    await revoke(old.token);
+    const tightened = await mint(old.plugin, old.subject ?? "owner", old.app, [ingredient.id]);
+    await audit("token.tighten", {
+      subject: old.subject,
+      app: old.app,
+      plugin: old.plugin,
+      oldToken: old.token.slice(0, 16),
+      token: tightened.token.slice(0, 16),
+      ingredient: ingredient.id,
+    });
+    return json({ token: tightened.token, plugin: tightened.plugin, subject: tightened.subject, app: tightened.app, scope: ingredient.id, label: ingredient.label, revoked: old.token });
+  }
   const tok = path.match(/^\/api\/tokens\/(.+)$/);
   if (req.method === "DELETE" && tok) {
     if (!isOwner(req) && !session) return json({ error: "unauthorized" }, 401);
@@ -602,11 +627,15 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
 
   // The 4th self-improvement loop (#72): cluster the gate-allow audit events per app/plugin
   // and PROPOSE named scope ingredients (entries for scopes.ts) capturing exactly what each
-  // app was observed reading. Owner-only: it reads everyone's audit trail. Output is the
-  // decision doc for curating a new ingredient (name/label are drafts; a human finalizes).
+  // app was observed reading. A signed-in user sees proposals associated with their grants;
+  // the owner sees all. Names/labels are drafts; a human finalizes them.
   if (req.method === "GET" && path === "/api/promote") {
-    if (!isOwner(req)) return json({ error: "unauthorized" }, 401);
-    return json({ proposals: proposeIngredients(auditLog()) });
+    const subj = subjectOf();
+    if (!subj) return json({ error: "unauthorized" }, 401);
+    const proposals = proposeIngredients(auditLog());
+    if (subj === "owner") return json({ proposals });
+    const grants = new Set(listTokens().filter((t) => t.subject === subj).map((t) => `${t.app || ""}\0${t.plugin}`));
+    return json({ proposals: proposals.filter((p) => grants.has(`${p.app}\0${p.plugin}`)) });
   }
 
   // Layer-1 listing catalog (read-only; no auth needed for discoverability).
