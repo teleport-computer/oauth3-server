@@ -24,6 +24,7 @@ Required/used env (see [`.env.example`](../.env.example) and `server/handler.ts 
 | `POLL_INTERVAL_MIN` | background scheduler cadence; default `30` |
 | `PUBLIC_URL` | canonical external origin (passkey rpId/origin, OAuth redirect URIs); strip trailing `/` |
 | `BROWSER_SPI_URL` | the Browser SPI base for `/screenshot` (render worker); blank → `502` on use |
+| `BROWSER_SPI_SECRET` | shared bearer the Browser SPI requires on every control endpoint (`/session`, `/screenshot`, …); blank → SPI returns `401` and `/screenshot` surfaces `502 browser SPI /session 401: unauthorized`. It is a **secret** — rides `env_passthrough`, never the manifest `env`. |
 | `OWNER_NAME`, `SOURCE_URL`, `OWNER_EMAIL`, `ATTESTATION_URL`, `INSTANCE_MODE` | copy on the public home/privacy/terms/evidence pages |
 | `GITHUB_CLIENT_ID/SECRET`, `GOOGLE_CLIENT_ID/SECRET` | federated login creds (else those routes `404`) |
 | `OTTER_BASE`, `GITHUB_OAUTH_BASE/API_BASE`, `GOOGLE_*_BASE` | per-plugin/provider overrides (for e2e mocks) |
@@ -47,6 +48,11 @@ oauth3-server runs as a tee-daemon **project** (no dedicated CVM).
 }
 ```
 
+> The snippet above is the **minimal dev** example; the shipped `project.json` also passes
+> through the `OAUTH3_OWNER_SECRET`/`OAUTH3_SEAL_KEY` aliases **and**
+> `BROWSER_SPI_URL`/`BROWSER_SPI_SECRET` (the SPI secret is mandatory — see the env table above
+> and issue #14). Copy the live file, not this snippet, when deploying.
+
 Ship a build:
 
 ```bash
@@ -56,9 +62,12 @@ curl -X POST $CVM/_api/projects -H "Authorization: Bearer $TOKEN" \
   -F 'manifest=@server/project.json;type=application/json' -F "files=@oauth3.tgz"
 ```
 
-**Secret delivery.** `OWNER_SECRET` and `SEAL_KEY` must **not** be committed (they would land
-in the attested source tree). `project.json` lists them under `env_passthrough` so the daemon
-injects them from its own dstack-encrypted env. **Today** the daemon honors `env_passthrough`
+**Secret delivery.** `OWNER_SECRET`, `SEAL_KEY`, and `BROWSER_SPI_SECRET` must **not** be
+committed (they would land in the attested source tree). `project.json` lists them under
+`env_passthrough` so the daemon injects them from its own dstack-encrypted env.
+`BROWSER_SPI_SECRET` rides `env_passthrough` for the same reason: `browser.ts` sends it as the
+`Authorization: Bearer` on every SPI call, so if it is absent the render path 502s with
+`browser SPI /session 401: unauthorized` (issue #14). **Today** the daemon honors `env_passthrough`
 for the `image` runtime but not yet for isolated deno (`tee-daemon` `ISSUES.md` #13, ~4-line
 fix). Until that lands: deploy as an `image` runtime, **or** rely on dstack LUKS2 +
 per-project volume isolation for at-rest protection (the daemon derives `SEAL_KEY` from TEE
