@@ -80,6 +80,17 @@ export const STATIC_LISTING: Listing[] = [
     statement: "Reads your z.ai GLM Coding Plan usage (quota %, tokens, per-model) under a scoped, revocable read token — read-only, never your API key or prompts.",
     discharge: 1,
   },
+  {
+    // Unblocks amiller/oauth3-apps#24 (passbook wallet). Read-only delegation surface:
+    // mints a scoped, revocable token rendered as a shareable pass card for a recipient.
+    // allowedPlugins/maxScope are the operator's trust call; defaulted to all live read-plugins.
+    appId: "passbook",
+    allowedPlugins: ["otter", "youtube", "reddit", "nytimes", "twitter", "google-calendar", "amazon", "zai"],
+    maxScope: "read",
+    statement:
+      "Mints scoped, revocable, shareable passes (read-only) over connected accounts for delegated access — renders a pass card (deep link + encumbrance) for a recipient; never writes, never exports cookies.",
+    discharge: 1,
+  },
 ];
 
 /**
