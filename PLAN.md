@@ -55,4 +55,4 @@ unit-test acceptance below.
 - [x] Show the enforced scope sentence from `GET /api/scopes`.
 - [x] Revoke the broad token and re-mint a matching registered ingredient.
 - [x] Return the new scope and enforcement label from the tighten endpoint.
-- [ ] Verify the signed-in staging flow and commit Tier 2 evidence.
+- [x] Verify the signed-in staging flow and commit Tier 2 evidence.
