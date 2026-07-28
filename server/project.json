@@ -5,5 +5,5 @@
   "isolation": "container",
   "mode": "dev",
   "env": { "POLL_INTERVAL_MIN": "30", "BROWSER_SPI_URL": "https://d36facf2a9d92be3c1e554240861a27fcf5fcf31-3000.dstack-pha-prod7.phala.network" },
-  "env_passthrough": ["OWNER_SECRET", "SEAL_KEY", "OAUTH3_OWNER_SECRET", "OAUTH3_SEAL_KEY"]
+  "env_passthrough": ["OWNER_SECRET", "SEAL_KEY", "OAUTH3_OWNER_SECRET", "OAUTH3_SEAL_KEY", "BROWSER_SPI_URL", "BROWSER_SPI_SECRET"]
 }
