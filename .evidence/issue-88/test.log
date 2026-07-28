@@ -1,0 +1,52 @@
+[0m[32mCheck[0m server/scopes_test.ts
+[0m[32mCheck[0m server/handler_test.ts
+[0m[38;5;245mrunning 20 tests from ./server/scopes_test.ts[0m
+scopeReads: no scope cap is unrestricted (null) ... [0m[32mok[0m [0m[38;5;245m(518µs)[0m
+scopeReads: otter:live-follow confines to live+frame ... [0m[32mok[0m [0m[38;5;245m(66µs)[0m
+scopeReads: union + non-ingredient caps ignored ... [0m[32mok[0m [0m[38;5;245m(125µs)[0m
+scopeReads: youtube:history confines to feed ... [0m[32mok[0m [0m[38;5;245m(45µs)[0m
+scopeReads: calendar:free-busy confines to items ... [0m[32mok[0m [0m[38;5;245m(54µs)[0m
+scopeIngredient: youtube:history + calendar:free-busy are in the enforced ledger ... [0m[32mok[0m [0m[38;5;245m(97µs)[0m
+scopeLabel: surfaces the human dial only for ingredients ... [0m[32mok[0m [0m[38;5;245m(71µs)[0m
+handler GET /api/otter/items — read-scope gating ...
+[0m[38;5;245m------- output -------[0m
+[init] ready — plugins: otter, youtube, reddit, nytimes, twitter, google-calendar, amazon, hackernews
+[0m[38;5;245m----- output end -----[0m
+handler GET /api/otter/items — read-scope gating ... [0m[32mok[0m [0m[38;5;245m(10ms)[0m
+scopeIngredients: surfaces the enforced ledger with ids ... [0m[32mok[0m [0m[38;5;245m(142µs)[0m
+scopeIngredient: exact enforced record by id; undefined when unknown ... [0m[32mok[0m [0m[38;5;245m(59µs)[0m
+handler GET /api/scopes(+/:id) — public, exact enforced label ... [0m[32mok[0m [0m[38;5;245m(645µs)[0m
+pluginCapabilities: a CAN/CANNOT statement for every registered plugin ... [0m[32mok[0m [0m[38;5;245m(181µs)[0m
+pluginCapability: exact record by plugin; undefined when unknown ... [0m[32mok[0m [0m[38;5;245m(50µs)[0m
+approvePage: renders the exact ledger statement for the requested plugin ... [0m[32mok[0m [0m[38;5;245m(243µs)[0m
+handler GET /api/scopes — ledger also surfaces the plugin statements ... [0m[32mok[0m [0m[38;5;245m(187µs)[0m
+appDeclarations: every consumed id resolves to an enforced ingredient ... [0m[32mok[0m [0m[38;5;245m(127µs)[0m
+appDeclarations: feedling consumes youtube:history and offers feedling:digest ... [0m[32mok[0m [0m[38;5;245m(120µs)[0m
+handler GET /api/scopes — surfaces the apps composition graph ... [0m[32mok[0m [0m[38;5;245m(189µs)[0m
+handler GET /scopes — renders the composition panel from the ledger ... [0m[32mok[0m [0m[38;5;245m(573µs)[0m
+handler GET /api/otter/{live,frame,feed} — read-scope gating + audit ... [0m[32mok[0m [0m[38;5;245m(13ms)[0m
+[0m[38;5;245m------- post-test output -------[0m
+All handler tests passed.
+[0m[38;5;245m----- post-test output end -----[0m
+[0m[38;5;245mrunning 14 tests from ./server/handler_test.ts[0m
+handler: health check ...
+[0m[38;5;245m------- post-test output -------[0m
+[init] ready — plugins: otter, youtube, reddit, nytimes, twitter, google-calendar, amazon, hackernews
+[0m[38;5;245m----- post-test output end -----[0m
+handler: health check ... [0m[32mok[0m [0m[38;5;245m(9ms)[0m
+handler: POST /api/connect refuses unlisted app (AC1) ... [0m[32mok[0m [0m[38;5;245m(472µs)[0m
+handler: POST /api/connect allows listed app (AC1) ... [0m[32mok[0m [0m[38;5;245m(461µs)[0m
+handler: POST /api/connect scope overflow → dev-mode (AC3) ... [0m[32mok[0m [0m[38;5;245m(196µs)[0m
+handler: POST /api/connect unknown plugin → 404 ... [0m[32mok[0m [0m[38;5;245m(168µs)[0m
+handler: GET /api/listing returns catalog ... [0m[32mok[0m [0m[38;5;245m(166µs)[0m
+handler: GET /api/listing entries have required fields ... [0m[32mok[0m [0m[38;5;245m(167µs)[0m
+handler: POST /api/connect app not allowed for plugin → refuse ... [0m[32mok[0m [0m[38;5;245m(162µs)[0m
+handler: audit log records connect.refuse (AC5) ... [0m[32mok[0m [0m[38;5;245m(418µs)[0m
+handler returns 404 for unknown routes ... [0m[32mok[0m [0m[38;5;245m(1ms)[0m
+handler returns signedIn:false for /api/me without auth ... [0m[32mok[0m [0m[38;5;245m(180µs)[0m
+handler: GET /api/:plugin/items returns list under `items` AND `data` (alias) — #95 ... [0m[32mok[0m [0m[38;5;245m(895µs)[0m
+handler: GET /api/:plugin/items/:id returns single item under `data` (no `items`) — #95 ... [0m[32mok[0m [0m[38;5;245m(220µs)[0m
+handler: #131 subjectless token is rejected, not silently owner ... [0m[32mok[0m [0m[38;5;245m(1ms)[0m
+
+[0m[32mok[0m | 34 passed | 0 failed [0m[38;5;245m(147ms)[0m
+
