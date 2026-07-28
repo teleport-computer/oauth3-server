@@ -12,6 +12,7 @@ import { recordTokenUse } from "./stepup.ts";
 import { proposeIngredients } from "./promoter.ts";
 import { approvePage } from "./approve-page.ts";
 import { scopesPage } from "./scopes-page.ts";
+import { allPlugins } from "./plugins/registry.ts";
 import type { ConnectReq } from "./connect.ts";
 import handler from "./handler.ts";
 
@@ -145,12 +146,16 @@ Deno.test("handler GET /api/scopes(+/:id) — public, exact enforced label", asy
 // --- plugin capability statements (RFC 0009 step 1) — one operator-authored sentence per
 // in-tree plugin, surfaced on the approve page AND via the /api/scopes ledger from ONE
 // source (RFC 0004 anti-hollow-green). The set MUST cover every plugin under server/plugins/.
-Deno.test("pluginCapabilities: a CAN/CANNOT statement for every in-tree plugin", () => {
+Deno.test("pluginCapabilities: a CAN/CANNOT statement for every registered plugin", () => {
   const all = pluginCapabilities();
-  assertEquals(
-    all.map((p) => p.plugin).sort(),
-    ["amazon", "google-calendar", "nytimes", "otter", "reddit", "twitter", "youtube"],
-  );
+  // The invariant is coverage of the live registry — in-tree code plugins AND declarative
+  // sites (server/plugins/sites/*.json), which contribute a statement the same way. The 7
+  // in-tree plugins are a mandatory subset; declarative sites extend it without a code edit.
+  const have = new Set(all.map((p) => p.plugin));
+  for (const id of allPlugins().map((p) => p.id)) assert(have.has(id), `${id} has a capability statement`);
+  for (const id of ["amazon", "google-calendar", "nytimes", "otter", "reddit", "twitter", "youtube"]) {
+    assert(have.has(id), `in-tree ${id} has a statement`);
+  }
   for (const p of all) {
     assert(p.statement.length > 0, `${p.plugin} has a statement`);
     assert(/\bCAN\b/.test(p.statement), `${p.plugin} says what it CAN read`);

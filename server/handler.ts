@@ -1,6 +1,9 @@
 // Routes:
 //   GET    /api/health
 //   GET    /api/plugins                       list plugins + jar status
+//   GET    /api/sites                         owner — list registered declarative sites (RFC 0012)
+//   POST   /api/sites     {manifest}          owner — register a longtail site as data, no deploy
+//   DELETE /api/sites/:id                      owner — unregister a runtime site
 //   POST   /api/cookies   {plugin,cookies}    owner — extension/CLI syncs a jar
 //   POST   /api/tokens    {plugin,subject}    owner — mint a scoped read token
 //   GET    /api/tokens                        owner — list tokens
@@ -51,6 +54,7 @@ import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot, browserFeed } from "./browser.ts";
 import { apiLike, apiMe, apiTimeline, apiTweet, apiUnlike, browserTrace } from "./twitter-actions.ts";
 import { appDeclarations, pluginCapabilities, scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
+import { deletePersistedSite, hydratePersistedSites, listSites, persistSite, registerSite, unregisterSite } from "./sites.ts";
 import { proposeIngredients } from "./promoter.ts";
 import { approveChallenge, createChallenge, denyChallenge, getChallenge, initStepup, recordTokenUse, score, wasFirstUse } from "./stepup.ts";
 
@@ -92,6 +96,8 @@ async function init(env: Record<string, string>, dataDir: string) {
   configureAmazon(env);
   await initListings(dataDir);
   await initEval(dataDir);
+  const nSites = hydratePersistedSites(dataDir);
+  if (nSites) console.log(`[init] hydrated ${nSites} runtime site(s) from ${dataDir}/sites`);
   ownerSecret = env.OWNER_SECRET || env.OAUTH3_OWNER_SECRET || env.EXT_SHARED_SECRET || "";
   publicUrl = (env.PUBLIC_URL || "").replace(/\/$/, "");
   browserSpiUrl = (env.BROWSER_SPI_URL || "").replace(/\/$/, "");
@@ -108,6 +114,15 @@ function json(obj: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
   });
+}
+// #131: a scoped token MUST carry a subject. The old `t.subject ?? "owner"` silently read the
+// OWNER's (usually stale) jar and then blamed the user's cookies — the single biggest cause of
+// bogus "app is broken" reports. No fallback: reject a subjectless token. `t` is null only on the
+// owner-authenticated path (every caller 401s when `!isOwner(req) && !t`), so owner stays correct.
+function jarSubject(t: Token | null): string | Response {
+  if (!t) return "owner";
+  if (!t.subject) return json({ error: "token has no subject — remint the token with a subject (#131)" }, 400);
+  return t.subject;
 }
 function html(body: string): Response {
   return new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
@@ -443,6 +458,27 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   // RFC 0007 §5.2: listing store
   if (req.method === "GET" && path === "/api/listings") {
     return json({ listings: getListings() });
+  }
+
+  // --- declarative sites (RFC 0012): register a longtail site as data, at runtime, no deploy ---
+  if (path === "/api/sites") {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    if (req.method === "GET") return json({ sites: listSites() });
+    if (req.method === "POST") {
+      const m = await req.json().catch(() => null) as any;
+      try { registerSite(m); } catch (e) { return json({ error: (e as Error).message }, 400); }
+      await persistSite(ctx.dataDir || "", m);
+      await audit("site.register", { id: m.id, scopes: (m.scopes ?? []).map((s: { id: string }) => s.id) });
+      return json({ ok: true, id: m.id, scopes: (m.scopes ?? []).map((s: { id: string }) => s.id) });
+    }
+  }
+  const siteDel = path.match(/^\/api\/sites\/([a-z0-9-]+)$/);
+  if (siteDel && req.method === "DELETE") {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    if (!unregisterSite(siteDel[1])) return json({ error: "not a runtime site" }, 404);
+    await deletePersistedSite(ctx.dataDir || "", siteDel[1]);
+    await audit("site.unregister", { id: siteDel[1] });
+    return json({ ok: true, id: siteDel[1] });
   }
 
   if (req.method === "POST" && path === "/api/cookies") {
@@ -782,7 +818,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "screenshot", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
     const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
@@ -811,7 +848,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verifyCap(bearer, plugin.id, "jar");
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
     const jar = rj.jar;
     await audit("jar.release", { plugin: plugin.id, subject: subj, count: Object.keys(jar).length, by: t ? (t.app || t.subject || "token") : "owner" });
@@ -829,7 +867,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "feed", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
     const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
@@ -888,7 +927,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "live", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
     const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
@@ -913,7 +953,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "frame", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
     const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
@@ -939,7 +980,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "items", bearer); if (denied) return denied;
     // A scoped token reads its own subject's jar; the owner secret reads owner's.
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
     const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
@@ -988,7 +1030,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "account", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
     const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
@@ -1021,7 +1064,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       await audit("google-calendar.event.edit.denied", { eventId, reason: "unauthorized" });
       return json({ error: `unauthorized — token must carry ${cap}` }, 401);
     }
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const by = t ? (t.app || t.subject || "token") : "owner";
     const body = await req.json().catch(() => null) as { changes?: unknown } | null;
     const rj = readJar(subj, "google-calendar", t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;

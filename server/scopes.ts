@@ -1,3 +1,5 @@
+import { loadSites } from "./plugins/declarative.ts";
+
 // Composable "scope ingredients" — the credential dial made legible and enforceable.
 // A token's caps may name one or more ingredients; each ingredient whitelists a set of
 // read kinds (the endpoint chokepoints in handler.ts). A token that carries NO ingredient
@@ -101,6 +103,31 @@ export const PLUGIN_CAPABILITIES: Record<string, { plugin: string; statement: st
       "CAN read your Amazon cart line items and a logged-in screenshot of your cart; a token MAY also carry an `amazon:cart-substitute` cap to swap ONE cart line for a comparable item within a price band and the same category. CANNOT check out, change address/payment, add arbitrary items, raise quantity, or read order history.",
   },
 };
+
+// Declarative longtail sites (server/plugins/sites/*.json) contribute their scope
+// ingredients + capability sentence the SAME way in-tree plugins do — merged into the
+// two ledgers above, so the gate (scopeReads), approve page, and /api/scopes enforce and
+// render them identically. A manifest scope is exactly as real as reddit:karma.
+{
+  const { ingredients, capabilities } = loadSites();
+  Object.assign(SCOPE_INGREDIENTS, ingredients);
+  Object.assign(PLUGIN_CAPABILITIES, capabilities);
+}
+
+// Runtime registration of a declarative site's scopes + capability (POST /api/sites, via
+// sites.ts) — merged into the SAME ledgers, so a dynamically-added site's scope enforces
+// and renders identically to an in-tree one. Unregister removes them again.
+export function registerSiteScopes(
+  ingredients: Record<string, { plugin: string; reads: string[]; label: string }>,
+  capabilities: Record<string, { plugin: string; statement: string }>,
+): void {
+  Object.assign(SCOPE_INGREDIENTS, ingredients);
+  Object.assign(PLUGIN_CAPABILITIES, capabilities);
+}
+export function unregisterSiteScopes(pluginId: string): void {
+  for (const id of Object.keys(SCOPE_INGREDIENTS)) if (SCOPE_INGREDIENTS[id].plugin === pluginId) delete SCOPE_INGREDIENTS[id];
+  delete PLUGIN_CAPABILITIES[pluginId];
+}
 
 // The full plugin-capability ledger (one statement per in-tree plugin). Public/read-only.
 export function pluginCapabilities(): { plugin: string; statement: string }[] {
