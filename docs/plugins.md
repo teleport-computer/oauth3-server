@@ -96,6 +96,16 @@ error becomes a `502` with the message — do not swallow/mask).
   (env arrives via the handler's `ctx.env`); a top-level `Deno.env.get` throws at import and
   crashes the container. Use a `configure<Plugin>(env)` function the handler calls at init
   (see `configureOtter`).
+- Do **not** add a **static** `import … from "npm:<pkg>"` at module top level if the package
+  — or any of its transitive deps — reads `process.env`/`Deno.env` at load. The isolated
+  container runs `--deny-env`, so a transitive env read at import time throws `NotCapable` and
+  crashes the container exactly like a direct top-level `Deno.env.get`. This was the #49 bug:
+  a top-level `import { Rettiwt } from "npm:rettiwt-api"` pulled in `debug`, which runs
+  `Object.keys(process.env)` at module load → `NotCapable: Requires env access` → the
+  container never booted → every route 500. Make such imports **lazy**
+  (`const { X } = await import("npm:<pkg>")` inside the function that needs them). The
+  structural guard in `server/boot_deny_env_test.ts` (#140) fails the build if a static
+  `npm:rettiwt-api` import re-appears in `server/`. *(2026-07-28, #49/#140.)*
 - Set a fetch timeout: `signal: AbortSignal.timeout(60_000)`.
 - On `401`/`403` from the site, throw a clear "jar rejected — cookies expired" message (the
   handler turns a thrown error into `502`).
