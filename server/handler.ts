@@ -33,7 +33,8 @@ import { initTokens, listTokens, mint, revoke, type Token, verify, verifyCap } f
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit } from "./audit.ts";
 import { formatAuditDecision, gate, Scope, STATIC_LISTING } from "./listing.ts";
-import { getListings, initListings } from "./listings.ts";
+import { addListing, getListings, initListings } from "./listings.ts";
+import { initCapabilities, mintListingCapability, revokeListingCapability, verifyListingCapability } from "./capabilities.ts";
 import { initEval, logEval, updateEvalOutcome } from "./eval.ts";
 import { startScheduler } from "./scheduler.ts";
 import { approvePage } from "./approve-page.ts";
@@ -96,6 +97,7 @@ async function init(env: Record<string, string>, dataDir: string) {
   configureReddit(env);
   configureAmazon(env);
   await initListings(dataDir);
+  await initCapabilities(dataDir);
   await initEval(dataDir);
   const nSites = hydratePersistedSites(dataDir);
   if (nSites) console.log(`[init] hydrated ${nSites} runtime site(s) from ${dataDir}/sites`);
@@ -135,6 +137,7 @@ function landingHtml(session: string | null, returnUrl: string, note: string): s
   return `<!doctype html><meta charset=utf-8><body style="font:15px system-ui;max-width:30rem;margin:3rem auto;color:#111"><p>${note} Redirecting…</p><script>${set}location.href=${JSON.stringify(returnUrl)};</script>`;
 }
 const isOwner = (req: Request) => !!ownerSecret && req.headers.get("Authorization") === `Bearer ${ownerSecret}`;
+const bearer = (req: Request): string => (req.headers.get("Authorization") || "").replace(/^Bearer\s+/, "");
 
 // #111: resolve a read jar, turning AmbiguousAccountError (a subject holding several
 // accounts for this plugin, none named) into a 409 carrying the available accounts so the
@@ -445,6 +448,27 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return json({ ready, plugins: allPlugins().map((p) => p.id) });
   }
 
+  if (req.method === "POST" && path === "/api/owner/capabilities") {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    const body = await req.json().catch(() => null) as { ttlMs?: unknown } | null;
+    const ttlMs = body?.ttlMs === undefined ? undefined : Number(body.ttlMs);
+    try {
+      const c = await mintListingCapability(ttlMs);
+      await audit("capability.mint", { scope: c.scope, jti: c.jti, exp: c.exp });
+      return json(c);
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+  }
+  const capRevoke = path.match(/^\/api\/owner\/capabilities\/([^/]+)\/revoke$/);
+  if (req.method === "POST" && capRevoke) {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    const jti = decodeURIComponent(capRevoke[1]);
+    const ok = await revokeListingCapability(jti);
+    await audit("capability.revoke", { scope: "listings:write", jti, found: ok });
+    return ok ? json({ ok: true, jti }) : json({ error: "capability not found" }, 404);
+  }
+
   if (req.method === "GET" && path === "/api/plugins") {
     const subj = subjectOf(); // jar status is per-identity; anonymous sees none present
     return json({
@@ -459,6 +483,19 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   // RFC 0007 §5.2: listing store
   if (req.method === "GET" && path === "/api/listings") {
     return json({ listings: getListings() });
+  }
+  if (req.method === "POST" && path === "/api/listings") {
+    const owner = isOwner(req);
+    const capability = owner ? null : verifyListingCapability(bearer(req));
+    if (!owner && !capability) return json({ error: "owner or listings:write capability required" }, 401);
+    const listing = await req.json().catch(() => null) as any;
+    if (!listing || typeof listing.id !== "string" || typeof listing.plugin !== "string" ||
+      !listing.statement || !listing.discharge || !["pending", "listed", "steered", "demoted"].includes(listing.status)) {
+      return json({ error: "id, plugin, statement, discharge, and status are required" }, 400);
+    }
+    await addListing(listing);
+    await audit("listing.write", { id: listing.id, plugin: listing.plugin, by: owner ? "owner" : "capability", jti: capability?.jti });
+    return json({ ok: true, listing });
   }
 
   // --- declarative sites (RFC 0012): register a longtail site as data, at runtime, no deploy ---
