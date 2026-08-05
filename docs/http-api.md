@@ -125,13 +125,32 @@ an expired jar as `409`, an unknown plugin as `404`, etc.
 
 ## Audit
 
+> **Spec amended #120 (2026-08-05):** the audit store is now bounded — AGE 90d
+> (`RETENTION_MAX_AGE_DAYS`) **and** newest 1000 rows (`RETENTION_MAX_ENTRIES`), enforced on
+> every `audit()` write and again at boot (an over-policy store self-heals on next boot). This
+> replaces the prior hidden cap of **5000 rows**, which had no age bound and no operator
+> visibility (the ~800 KB / 5000-entry store on staging was the symptom). Collapsing repeated
+> consecutive events into one summarized row is a dashboard **view** concern
+> (`dashboard-page.ts`); it does not change the response shape below, which still returns the
+> full per-event trail.
+
 ### `GET /api/audit`
 - Auth: `session` **or** `owner`. Owner sees the whole log; everyone else sees entries whose
   `detail.subject` matches theirs.
-- Response: `{ "audit": [{ "ts","action","detail" }, …] }` (most-recent first, capped at 5000)
+- Response: `{ "audit": [{ "ts","action","detail" }, …] }` (most-recent first; bounded by the
+  retention policy above — age 90d / newest 1000)
 - Recorded actions: `cookies.sync`, `cookies.delete`, `token.mint`, `token.revoke`,
   `connect.request`, `connect.approve`, `connect.deny`, `read`, `screenshot`, `passkey.*`,
   `login.*`, `links.unlink`.
+
+### `POST /api/audit/prune`
+- Auth: `owner` only (`401 { "error": "owner only" }` otherwise).
+- Applies the retention policy now and reports the audit-store size before vs. after, plus the
+  reduction (if any) that ran at boot on the real on-disk store. Idempotent — on a store already
+  within policy it removes `0` and reports equal before/after.
+- Response `200`: `{ "before": {"entries","bytes"}, "after": {"entries","bytes"},
+  "removed": <n>, "policy": {"maxAgeDays":90,"maxEntries":1000},
+  "boot": {"before":<n>,"after":<n>,"removed":<n>} | null }`.
 
 ## Sign-in, account, linking
 
