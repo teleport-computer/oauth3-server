@@ -1,0 +1,2 @@
+entries: 1000
+actions: {'stepup.challenged': 667, 'cookies.sync': 28, 'token.mint': 26, 'connect.refuse': 150, 'token.revoke': 35, 'gate': 35, 'stepup.approved': 25, 'account': 5, 'read': 9, 'connect.approve': 10, 'connect.request': 10}
