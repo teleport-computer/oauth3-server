@@ -309,3 +309,15 @@ Deno.test("handler: #131 subjectless token is rejected, not silently owner", asy
   });
   assertEquals(r2.status, 409);
 });
+
+// #120 — audit retention prune endpoint is owner-only and reports store sizes.
+Deno.test("handler: POST /api/audit/prune is owner-only", async () => {
+  const noAuth = await callHandler("POST", "/api/audit/prune");
+  assertEquals(noAuth.status, 401); // a non-owner wallet session must not prune/report
+  const ok = await ownerReq("POST", "/api/audit/prune");
+  assertEquals(ok.status, 200);
+  // @ts-ignore
+  assertEquals(typeof ok.json?.removed, "number");
+  // @ts-ignore
+  assertEquals((ok.json?.policy?.maxEntries ?? 0) > 0, true);
+});
