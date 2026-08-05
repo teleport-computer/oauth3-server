@@ -1,58 +1,51 @@
-# PLAN — #111 Vault: account-qualified jars
+# PLAN — oauth3-server #143
 
-Derived from issue #111 `## Acceptance criteria`. Change type: **backend/API** →
-**Tier 1** evidence (HTTP transcript on staging + pinned `/_api/version`), plus the
-unit-test acceptance below.
+**Title:** Quickstart .env setup silently fails: placeholder lines in .env.example shadow
+appended secrets.
 
-## Acceptance checkboxes
-- [ ] `deno check server/main.ts` green
-- [ ] `deno test` green (existing 118 + new vault account test)
-- [ ] Unit test: two twitter jars (`twid=u%3D111`, `twid=u%3D222`) under one subject coexist
-- [ ] `getJar(subj,"twitter","111")` / `"222"` return the right jar
-- [ ] `getJar(subj,"twitter")` (omitted, both present) throws `AmbiguousAccountError`
-- [ ] a token minted with `account:"222"` resolves jar 222
-- [ ] a single-jar subject + account-less token behaves exactly as today (back-compat)
-- [ ] a sealed vault written by current (2-part-key) code loads + migrates → 3-part, no data loss
-- [ ] No fallback behavior: ambiguity + underivable accounts are explicit errors
+## Root cause (confirmed empirically on Deno 2.9.0)
+Deno's `--env-file` keeps the **FIRST** occurrence of a duplicate key. `.env.example` ships
+blank placeholders `OWNER_SECRET=` / `SEAL_KEY=`. The quickstart does `cp .env.example .env`
+then `echo "SEAL_KEY=…" >> .env`, so the blank placeholder wins and the real key is ignored.
+`main.ts` loads via `Deno.env.toObject()` → `SEAL_KEY=""`. Because `init()` runs lazily on the
+first request (not at boot), the resulting `SEAL_KEY required to seal the cookie vault` error
+surfaces per-request, not at startup.
 
-## Implementation surface (against origin/staging)
+Reproduction (on box): a `.env` with `SEAL_KEY=` then `SEAL_KEY=realvalue` → `Deno.env` reads
+`""` (first wins). With the placeholder commented, it reads `"realvalue"`. ✓
 
-1. `server/vault.ts` — keyOf→3-part (`subject:plugin:account`); `AmbiguousAccountError`;
-   `setJar(s,p,account,jar)`; `getJar(s,p,account?)` (omitted→single|null, >1→throw);
-   `deleteJar(s,p,account?)` (same ambiguity rule); `jarsFor(s,p)` replaces `jarStatus`;
-   `allJars()` entries gain `account`; sealed format `{v:3,store}` + legacy migration
-   (1-part→owner, 2-part→3-part via injected `deriveAccount(plugin,jar)`). Parse keys from
-   the RIGHT so colon-containing subjects (did:key:, gh:, …) stay correct.
-2. `server/plugins/types.ts` — add sync `accountId?(jar): string` (distinct from async `account?`).
-3. `server/plugins/twitter.ts` — `accountId`: decode `twid` (`u%3D<id>`→id); throw if absent/unparseable.
-4. `server/tokens.ts` — `Token.account?`; `mint(...caps, account?)`.
-5. `server/connect.ts` — `ConnectReq.account?`; `createConnect(...attestation, account?)`; `approveConnect` mints with account.
-6. `server/handler.ts` —
-   - `initVault(dataDir, key, deriveAccount)` using registry accountId (default "default").
-   - `POST /api/cookies`: derive account, store 3-part, return+audit account.
-   - `DELETE /api/cookies/:plugin`: `?account=`; ambiguity→409+accounts.
-   - `POST /api/tokens`: `body.account` (validate names an existing jar), mint with account.
-   - `POST /api/connect`: `body.account` → createConnect; approve path validates/409s ambiguity.
-   - `/api/plugins`: `jar`→`jars:[{account,updatedAt,count}]`.
-   - 11 `getJar` read sites: pass `t?.account`; `AmbiguousAccountError`→409+accounts (helper).
-   - owner debug surfaces (twitter/youtube): omitted-account resolution + `?account=`.
-7. `server/scheduler.ts` — destructure `account`; transcript path gains account (no clobber).
-8. Update existing tests: `amazon_test.ts` (×9), `handler_test.ts` (×2) → `setJar(s,p,"default",jar)`.
-9. New `server/vault_test.ts` — the acceptance scenarios incl. sealed-legacy migration.
+## Acceptance (from issue body) — checkboxes
+- [ ] (A) Verbatim quickstart (`cp .env.example .env` + `echo >>`) starts the server and serves
+      a vault-sealing request with **no** `SEAL_KEY required` error. Fixed at the source: blank
+      placeholders in `.env.example` cannot shadow a real value under Deno's first-occurrence rule.
+- [ ] (B) A genuinely missing `SEAL_KEY` fails **at startup** with a message naming the variable,
+      non-zero exit — not per-request on first use.
+- [ ] (C) PR pastes BOTH transcripts: (1) quickstart end-to-end, (2) deliberate no-SEAL_KEY boot.
 
-## Evidence (Tier 1)
-- Deploy to staging; `GET /_api/version` pinned to this PR commit.
-- HTTP transcript: sync two twitter jars under one subject, show both coexist via
-  `/api/plugins` (`jars`), the 409-with-accounts on an ambiguous read, and a token+read
-  bound to one account.
-- If staging core-deploy is operator-only on this box → ship the verifiable subset
-  (unit tests + the issue's literal acceptance) and comment the staging-transcript step
-  back to the operator (scope-down rule). Never fake the transcript.
+## Diff plan (smallest correct)
+1. **`.env.example`** — comment out the two blank secret placeholders (`# OWNER_SECRET=`,
+   `# SEAL_KEY=`) with a note explaining the --env-file first-occurrence shadowing. Commented
+   lines are no longer a key, so the appended real value is the sole occurrence and wins. (The
+   issue's own preferred fix: "comment out the placeholder secret lines in .env.example".)
+2. **`server/main.ts`** — before `Deno.serve`, if `DATA_DIR` is set and `SEAL_KEY`/`OAUTH3_SEAL_KEY`
+   is blank, `console.error` a message naming `SEAL_KEY` and `Deno.exit(1)`. Mirrors `initVault`'s
+   in-memory exemption (`DATA_DIR` empty ⇒ no SEAL_KEY needed). This is the dev entrypoint; the
+   daemon entrypoint is `handler.ts` (env injected directly, no `--env-file`), so staging is
+   unaffected and the daemon design always injects `SEAL_KEY`.
+3. **`README.md`** — fix the stale quickstart: drop the obsolete "# then dedupe the blank one"
+   comment and add the `SEAL_KEY` echo line so README matches `docs/operator.md` (currently it
+   omits SEAL_KEY entirely, which my new boot check would now catch clearly).
 
-## Issue #87 — contextual-authorization feedback loop
+## Evidence tier
+Tier 1 (behavior change, no UI surface). The issue's own `## Operator steps` says "config/docs
+only, no redeploy needed to verify" — and crucially **neither fix is exercised by the staging
+runtime**: staging runs via the tee-daemon (`entry: handler.ts`, env injected, no `--env-file`),
+so the bug cannot be reproduced there. The correct evidence is the two local boot transcripts the
+acceptance names. Staging `/_api/version` pin is included anyway for completeness.
 
-- [x] Surface real promoter proposals on the signed-in dashboard.
-- [x] Show the enforced scope sentence from `GET /api/scopes`.
-- [x] Revoke the broad token and re-mint a matching registered ingredient.
-- [x] Return the new scope and enforcement label from the tighten endpoint.
-- [x] Verify the signed-in staging flow and commit Tier 2 evidence.
+## Verify steps
+- `deno check server/main.ts` (clean).
+- `deno task test` (must stay green — main.ts is not imported by tests, so no regressions).
+- Transcript 1: fresh quickstart on the branch → `deno task start` → `curl` a vault-sealing
+  request → no SEAL_KEY error.
+- Transcript 2: blank SEAL_KEY → `deno task start` → startup error naming SEAL_KEY + exit 1.

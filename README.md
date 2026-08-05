@@ -40,7 +40,8 @@ live HAR before trusting in prod.
 
 ```bash
 cp .env.example .env
-echo "OWNER_SECRET=$(openssl rand -hex 32)" >> .env   # then dedupe the blank one
+echo "OWNER_SECRET=$(openssl rand -hex 32)" >> .env
+echo "SEAL_KEY=$(openssl rand -hex 32)"      >> .env   # 32-byte hex (64 chars)
 deno task start
 ```
 
