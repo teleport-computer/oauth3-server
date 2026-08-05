@@ -9,6 +9,7 @@
 //   GET    /api/tokens                        owner — list tokens
 //   DELETE /api/tokens/:token                 owner — revoke a token
 //   GET    /api/audit                         owner — audit log
+//   POST   /api/audit/prune                    owner — apply retention policy, report before/after sizes (#120)
 //   GET    /api/promote                       signed-in user — proposed scope ingredients from observed reads
 //   POST   /api/tokens/:token/tighten          signed-in user — revoke and re-mint with a named ingredient
 //   GET    /api/scopes                        public — enforced scope-ingredient ledger + app consumes/offers (#88)
@@ -31,7 +32,7 @@ import { configureEgress, egressFetch, egressProxy } from "./egress.ts";
 import { AmbiguousAccountError, deleteJar, getJar, initVault, jarsFor, setJar, strandedJars } from "./vault.ts";
 import { initTokens, listTokens, mint, revoke, type Token, verify, verifyCap } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
-import { audit, auditLog, initAudit } from "./audit.ts";
+import { audit, auditLog, initAudit, pruneAudit } from "./audit.ts";
 import { formatAuditDecision, gate, Scope, STATIC_LISTING } from "./listing.ts";
 import { getListings, initListings } from "./listings.ts";
 import { initEval, logEval, updateEvalOutcome } from "./eval.ts";
@@ -590,6 +591,13 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!subj) return json({ error: "unauthorized" }, 401);
     const all = auditLog();
     return json({ audit: subj === "owner" ? all : all.filter((e) => (e.detail as { subject?: string } | undefined)?.subject === subj) });
+  }
+
+  // #120 — apply the audit retention policy now and report the store size before vs. after
+  // (plus the boot-time prune), so the operator can see retention work on real data.
+  if (req.method === "POST" && path === "/api/audit/prune") {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    return json(await pruneAudit());
   }
 
   // #132 — make a stranded jar legible. `?subject=<current wallet subject>` classifies every

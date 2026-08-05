@@ -1,51 +1,34 @@
-# PLAN — oauth3-server #143
+# PLAN — oauth3-server #120 (base staging)
 
-**Title:** Quickstart .env setup silently fails: placeholder lines in .env.example shadow
-appended secrets.
+Issue: "Audit log is user-hostile: collapse repeated entries + retention policy"
 
-## Root cause (confirmed empirically on Deno 2.9.0)
-Deno's `--env-file` keeps the **FIRST** occurrence of a duplicate key. `.env.example` ships
-blank placeholders `OWNER_SECRET=` / `SEAL_KEY=`. The quickstart does `cp .env.example .env`
-then `echo "SEAL_KEY=…" >> .env`, so the blank placeholder wins and the real key is ignored.
-`main.ts` loads via `Deno.env.toObject()` → `SEAL_KEY=""`. Because `init()` runs lazily on the
-first request (not at boot), the resulting `SEAL_KEY required to seal the cookie vault` error
-surfaces per-request, not at startup.
+## Acceptance (from issue body — verbatim, the gate checks this)
+1. A run of identical consecutive audit events renders as ONE row carrying a count and a
+   time range (example: `cookies.sync google-calendar ×14 · last 2m`).
+2. Expanding that row still reaches the individual events — collapsing is a VIEW concern,
+   it must not destroy the trail.
+3. A bounded retention rule prunes the audit store (age- or count-based, state which + why).
+4. Demonstrate on real staging data: record audit store size before, run prune, record after.
+5. Evidence Tier 2: screenshot of collapsed run next to expanded form + before/after size.
 
-Reproduction (on box): a `.env` with `SEAL_KEY=` then `SEAL_KEY=realvalue` → `Deno.env` reads
-`""` (first wins). With the placeholder commented, it reads `"realvalue"`. ✓
+## Checklist
+- [x] retention policy in `server/audit.ts` — AGE (90d) + COUNT (1000) bounds, documented,
+      applied on every write (self-bounding) and at boot (self-heals an over-policy store).
+- [x] `applyRetention()` + `pruneAudit()` (reports before/after entries+bytes + boot prune).
+- [x] owner-only `POST /api/audit/prune` in `server/handler.ts` + route-table comment.
+- [x] collapse consecutive identical runs in dashboard `renderActs` (count + time range).
+- [x] expand row → reveal individual events (trail intact, data never destroyed).
+- [x] `server/audit_test.ts` — retention prunes aged + over-count, keeps newest, reports sizes.
+- [ ] `deno check server/main.ts` clean.
+- [ ] `deno test` green.
+- [ ] deploy to webhost-staging (`POST $TEE_DAEMON_URL/_api/projects`).
+- [ ] Tier-2 walk signed in as u-swarm: screenshot collapsed run + expanded form.
+- [ ] owner prune demo: real before/after store size on staging.
+- [ ] PR body per template; swap `ready`→`in-review` on PR open.
 
-## Acceptance (from issue body) — checkboxes
-- [ ] (A) Verbatim quickstart (`cp .env.example .env` + `echo >>`) starts the server and serves
-      a vault-sealing request with **no** `SEAL_KEY required` error. Fixed at the source: blank
-      placeholders in `.env.example` cannot shadow a real value under Deno's first-occurrence rule.
-- [ ] (B) A genuinely missing `SEAL_KEY` fails **at startup** with a message naming the variable,
-      non-zero exit — not per-request on first use.
-- [ ] (C) PR pastes BOTH transcripts: (1) quickstart end-to-end, (2) deliberate no-SEAL_KEY boot.
-
-## Diff plan (smallest correct)
-1. **`.env.example`** — comment out the two blank secret placeholders (`# OWNER_SECRET=`,
-   `# SEAL_KEY=`) with a note explaining the --env-file first-occurrence shadowing. Commented
-   lines are no longer a key, so the appended real value is the sole occurrence and wins. (The
-   issue's own preferred fix: "comment out the placeholder secret lines in .env.example".)
-2. **`server/main.ts`** — before `Deno.serve`, if `DATA_DIR` is set and `SEAL_KEY`/`OAUTH3_SEAL_KEY`
-   is blank, `console.error` a message naming `SEAL_KEY` and `Deno.exit(1)`. Mirrors `initVault`'s
-   in-memory exemption (`DATA_DIR` empty ⇒ no SEAL_KEY needed). This is the dev entrypoint; the
-   daemon entrypoint is `handler.ts` (env injected directly, no `--env-file`), so staging is
-   unaffected and the daemon design always injects `SEAL_KEY`.
-3. **`README.md`** — fix the stale quickstart: drop the obsolete "# then dedupe the blank one"
-   comment and add the `SEAL_KEY` echo line so README matches `docs/operator.md` (currently it
-   omits SEAL_KEY entirely, which my new boot check would now catch clearly).
-
-## Evidence tier
-Tier 1 (behavior change, no UI surface). The issue's own `## Operator steps` says "config/docs
-only, no redeploy needed to verify" — and crucially **neither fix is exercised by the staging
-runtime**: staging runs via the tee-daemon (`entry: handler.ts`, env injected, no `--env-file`),
-so the bug cannot be reproduced there. The correct evidence is the two local boot transcripts the
-acceptance names. Staging `/_api/version` pin is included anyway for completeness.
-
-## Verify steps
-- `deno check server/main.ts` (clean).
-- `deno task test` (must stay green — main.ts is not imported by tests, so no regressions).
-- Transcript 1: fresh quickstart on the branch → `deno task start` → `curl` a vault-sealing
-  request → no SEAL_KEY error.
-- Transcript 2: blank SEAL_KEY → `deno task start` → startup error naming SEAL_KEY + exit 1.
+## Policy rationale (for the PR)
+- AGE 90d: incident-review/forensics window for a personal server; older cookie-sync churn
+  has no investigative value — this is what stops "implicitly retained forever".
+- COUNT 1000: the bound that actually stops a runaway high-churn source (the cookies.sync
+  rate-limit issue) regardless of age; keeps the most-recent 1000.
+- Enforced on every write (no cron) + at boot (self-heals). Tunable in one place.
