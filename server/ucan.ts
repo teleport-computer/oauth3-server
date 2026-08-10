@@ -1,119 +1,29 @@
-// did:key UCAN-style capability tokens (RFC 0011) — offline delegation for the flows where
-// the core steps OUT of the loop (e.g. screenshare-debug #51 direct signing). A faithful
-// minimal subset of UCAN: iss/aud/att/prf, Ed25519 over a JWT, did:key principals. No deps —
-// Ed25519 is native in Deno WebCrypto. Errors propagate with a reason; nothing is masked.
+// TinyCloud-dialect did:key UCANs. The wire format is deliberately small and strict:
+// an EdDSA JWT whose attestations are an ERC-5573 resource -> ability -> caveats map.
+import { didKeyToEd25519 } from "./identity.ts";
+import { blake3 } from "npm:@noble/hashes@1.8.0/blake3";
 
-export interface Caveats {
-  maxRate?: number;
-  until?: number;
-  sink?: string;
-}
+export type Caveat = Record<string, unknown>;
+export type Att = Record<string, Record<string, Caveat[]>>;
 export interface Capability {
   with: string;
   can: string;
-  nb?: Caveats;
-}
-export interface Payload {
-  iss: string;
-  aud: string;
-  att: Capability[];
-  exp: number;
-  nbf?: number;
-  prf: string[];
+  caveats?: Caveat[];
 }
 export interface Keypair {
   did: string;
   privateKey: CryptoKey;
   publicKey: CryptoKey;
 }
-
-const enc = new TextEncoder();
-const bs = (u: Uint8Array) => u as unknown as BufferSource; // Deno 2.x BufferSource is ArrayBuffer-strict
-const b64url = (b: Uint8Array) =>
-  btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-const b64urlDec = (s: string) =>
-  Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
-const jsonB64 = (o: unknown) => b64url(enc.encode(JSON.stringify(o)));
-
-// --- base58btc (bitcoin alphabet), for did:key ---
-const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-function base58enc(bytes: Uint8Array): string {
-  let zeros = 0;
-  while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
-  const digits = [0];
-  for (let i = zeros; i < bytes.length; i++) {
-    let carry = bytes[i];
-    for (let j = 0; j < digits.length; j++) {
-      carry += digits[j] << 8;
-      digits[j] = carry % 58;
-      carry = (carry / 58) | 0;
-    }
-    while (carry) {
-      digits.push(carry % 58);
-      carry = (carry / 58) | 0;
-    }
-  }
-  let out = "1".repeat(zeros);
-  for (let i = digits.length - 1; i >= 0; i--) out += B58[digits[i]];
-  return out;
+export interface Payload {
+  iss: string;
+  aud: string;
+  exp: number;
+  nbf?: number;
+  nnc: string;
+  prf: string[];
+  att: Att;
 }
-function base58dec(str: string): Uint8Array {
-  let zeros = 0;
-  while (zeros < str.length && str[zeros] === "1") zeros++;
-  const bytes = [0];
-  for (let i = zeros; i < str.length; i++) {
-    const v = B58.indexOf(str[i]);
-    if (v < 0) throw new Error(`bad base58 char: ${str[i]}`);
-    let carry = v;
-    for (let j = 0; j < bytes.length; j++) {
-      carry += bytes[j] * 58;
-      bytes[j] = carry & 0xff;
-      carry >>= 8;
-    }
-    while (carry) {
-      bytes.push(carry & 0xff);
-      carry >>= 8;
-    }
-  }
-  const out = new Uint8Array(zeros + bytes.length);
-  for (let i = 0; i < bytes.length; i++) out[zeros + bytes.length - 1 - i] = bytes[i];
-  return out;
-}
-
-// --- did:key <-> Ed25519 public key (multicodec 0xed01) ---
-const ED_PREFIX = Uint8Array.from([0xed, 0x01]);
-function didFromRaw(raw: Uint8Array): string {
-  const p = new Uint8Array(ED_PREFIX.length + raw.length);
-  p.set(ED_PREFIX);
-  p.set(raw, ED_PREFIX.length);
-  return "did:key:z" + base58enc(p);
-}
-function rawFromDid(did: string): Uint8Array {
-  if (!did.startsWith("did:key:z")) throw new Error(`not a did:key: ${did}`);
-  const p = base58dec(did.slice("did:key:z".length));
-  if (p[0] !== 0xed || p[1] !== 0x01) throw new Error("did:key is not Ed25519");
-  return p.slice(2);
-}
-async function pubKeyFromDid(did: string): Promise<CryptoKey> {
-  return await crypto.subtle.importKey("raw", bs(rawFromDid(did)), "Ed25519", true, ["verify"]);
-}
-
-export async function generateKeypair(): Promise<Keypair> {
-  const kp = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]) as CryptoKeyPair;
-  const raw = new Uint8Array(await crypto.subtle.exportKey("raw", kp.publicKey));
-  return { did: didFromRaw(raw), privateKey: kp.privateKey, publicKey: kp.publicKey };
-}
-
-// --- mint / delegate ---
-async function sign(payload: Payload, key: CryptoKey): Promise<string> {
-  const head = jsonB64({ alg: "EdDSA", typ: "JWT", ucv: "0.1-oauth3" });
-  const body = jsonB64(payload);
-  const sig = new Uint8Array(
-    await crypto.subtle.sign("Ed25519", key, bs(enc.encode(`${head}.${body}`))),
-  );
-  return `${head}.${body}.${b64url(sig)}`;
-}
-
 export interface MintOpts {
   issuer: Keypair;
   audience: string;
@@ -123,117 +33,296 @@ export interface MintOpts {
   proofs?: string[];
   now?: number;
 }
+export interface VerifyOpts {
+  root: string;
+  now?: number;
+  proofs?: ProofStore;
+}
+export type ProofStore = Map<string, string> | Record<string, string>;
+
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+const source = (b: Uint8Array) => b as unknown as BufferSource;
+const b64 = (b: Uint8Array) =>
+  btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+function unb64(s: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]*$/.test(s)) throw new Error("invalid base64url");
+  const padded = s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - s.length % 4) % 4);
+  return Uint8Array.from(atob(padded), (c) => c.charCodeAt(0));
+}
+const jsonPart = (v: unknown) => b64(enc.encode(JSON.stringify(v)));
+
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function b58(bytes: Uint8Array): string {
+  const digits = [0];
+  for (const byte of bytes) {
+    let carry = byte;
+    for (let i = 0; i < digits.length; i++) {
+      carry += digits[i] * 256;
+      digits[i] = carry % 58;
+      carry = Math.floor(carry / 58);
+    }
+    while (carry) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  let out = "1".repeat(
+    bytes.findIndex((b) => b !== 0) < 0 ? bytes.length : bytes.findIndex((b) => b !== 0),
+  );
+  for (let i = digits.length - 1; i >= 0; i--) out += B58[digits[i]];
+  return out;
+}
+function didFromRaw(raw: Uint8Array): string {
+  const multicodec = new Uint8Array([0xed, 0x01, ...raw]);
+  return `did:key:z${b58(multicodec)}`;
+}
+
+export async function generateKeypair(): Promise<Keypair> {
+  const pair = await crypto.subtle.generateKey("Ed25519", true, [
+    "sign",
+    "verify",
+  ]) as CryptoKeyPair;
+  return {
+    did: didFromRaw(new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey))),
+    privateKey: pair.privateKey,
+    publicKey: pair.publicKey,
+  };
+}
+
+function resourceParts(resource: string) {
+  const m = /^(tinycloud:key:[^/]+):([^/?#]+)(?:\/([^?#]*))?(?:\?([^#]*))?(?:#(.*))?$/.exec(
+    resource,
+  );
+  if (!m || !m[1].startsWith("tinycloud:key:z")) {
+    throw new Error(`invalid TinyCloud resource: ${resource}`);
+  }
+  didKeyToEd25519(spaceDid(m[1]));
+  return { space: m[1], service: m[2], path: m[3] ?? "", query: m[4] ?? "", fragment: m[5] ?? "" };
+}
+function spaceDid(space: string): string {
+  const value = space.slice("tinycloud:key:".length);
+  return `did:key:${value}`;
+}
+function extendsResource(parent: string, child: string): boolean {
+  const p = resourceParts(parent), c = resourceParts(child);
+  if (
+    p.space !== c.space || p.service !== c.service || p.query !== c.query ||
+    p.fragment !== c.fragment
+  ) return false;
+  return c.path === p.path || (p.path === "" ? true : c.path.startsWith(`${p.path}/`));
+}
+function caveatsNarrower(parent: Caveat, child: Caveat): boolean {
+  for (const [key, value] of Object.entries(parent)) {
+    const next = child[key];
+    if (next === undefined) return false;
+    if (key === "maxRate" || key === "until") {
+      if (typeof value !== "number" || typeof next !== "number" || next > value) return false;
+    } else if (next !== value) return false;
+  }
+  return true;
+}
+function capabilityMap(capabilities: Capability[]): Att {
+  const att: Att = {};
+  for (const cap of capabilities) {
+    resourceParts(cap.with);
+    if (!cap.can || cap.can.includes(" ")) throw new Error("invalid ability");
+    const caveats = cap.caveats === undefined || cap.caveats.length === 0 ? [{}] : cap.caveats;
+    for (const caveat of caveats) {
+      if (!caveat || Array.isArray(caveat) || typeof caveat !== "object") {
+        throw new Error("invalid caveat");
+      }
+    }
+    (att[cap.with] ??= {})[cap.can] = caveats;
+  }
+  return att;
+}
+function capabilities(att: Att): Capability[] {
+  if (!att || Array.isArray(att) || typeof att !== "object") throw new Error("att must be a map");
+  const out: Capability[] = [];
+  for (const [with_, abilities] of Object.entries(att)) {
+    resourceParts(with_);
+    if (!abilities || Array.isArray(abilities) || typeof abilities !== "object") {
+      throw new Error("invalid att ability map");
+    }
+    for (const [can, caveats] of Object.entries(abilities)) {
+      if (!Array.isArray(caveats) || caveats.length === 0) {
+        throw new Error("bare [] caveats are invalid");
+      }
+      for (const caveat of caveats) {
+        if (!caveat || Array.isArray(caveat) || typeof caveat !== "object") {
+          throw new Error("invalid caveat");
+        }
+      }
+      out.push({ with: with_, can, caveats });
+    }
+  }
+  return out;
+}
+function covered(parent: Capability, child: Capability): boolean {
+  return parent.can === child.can && extendsResource(parent.with, child.with) &&
+    (parent.caveats ?? [{}]).some((p) =>
+      (child.caveats ?? [{}]).some((c) => caveatsNarrower(p, c))
+    );
+}
+
+function header(): string {
+  return jsonPart({ alg: "EdDSA", typ: "JWT", ucv: "0.1-oauth3" });
+}
+async function sign(payload: Payload, key: CryptoKey): Promise<string> {
+  const h = header(), body = jsonPart(payload), input = `${h}.${body}`;
+  const sig = new Uint8Array(await crypto.subtle.sign("Ed25519", key, source(enc.encode(input))));
+  return `${input}.${b64(sig)}`;
+}
 export async function mint(o: MintOpts): Promise<string> {
+  if (!Number.isInteger(o.expiresInSec) || o.expiresInSec <= 0) {
+    throw new Error("expiresInSec must be positive");
+  }
+  if (!/^did:key:z/.test(o.audience) || o.audience.includes("#")) {
+    throw new Error("aud must be a bare did:key DID");
+  }
   const now = o.now ?? Math.floor(Date.now() / 1000);
   const payload: Payload = {
     iss: o.issuer.did,
     aud: o.audience,
-    att: o.capabilities,
     exp: now + o.expiresInSec,
+    nnc: crypto.randomUUID(),
     prf: o.proofs ?? [],
+    att: capabilityMap(o.capabilities),
   };
-  if (o.notBefore) payload.nbf = o.notBefore;
+  if (o.notBefore !== undefined) payload.nbf = o.notBefore;
   return await sign(payload, o.issuer.privateKey);
 }
-// delegate = mint with proofs=[parent]; issuer here is the parent's audience holder.
-export const delegate = mint;
+export async function delegate(o: MintOpts): Promise<string> {
+  const proofs = (o.proofs ?? []).map((parent) => cidForToken(parent));
+  return await mint({ ...o, proofs });
+}
 
-export function decode(token: string): Payload {
+function parse(token: string): { payload: Payload; signingInput: string; signature: Uint8Array } {
   const parts = token.split(".");
-  if (parts.length !== 3) throw new Error("malformed token");
-  return JSON.parse(new TextDecoder().decode(b64urlDec(parts[1])));
+  if (parts.length !== 3 || parts.some((p) => p.length === 0)) throw new Error("malformed JWT");
+  let h: unknown, p: unknown;
+  try {
+    h = JSON.parse(dec.decode(unb64(parts[0])));
+    p = JSON.parse(dec.decode(unb64(parts[1])));
+  } catch {
+    throw new Error("malformed JWT JSON");
+  }
+  if (JSON.stringify(h) !== JSON.stringify({ alg: "EdDSA", typ: "JWT", ucv: "0.1-oauth3" })) {
+    throw new Error("unsupported JWT header");
+  }
+  const payload = p as Payload;
+  if (typeof payload.iss !== "string" || !payload.iss.startsWith("did:key:z")) {
+    throw new Error("missing or invalid iss");
+  }
+  if (typeof payload.aud !== "string" || !/^did:key:z[^#]+$/.test(payload.aud)) {
+    throw new Error("missing or invalid aud");
+  }
+  if (
+    !Number.isFinite(payload.exp) || typeof payload.nnc !== "string" || !Array.isArray(payload.prf)
+  ) throw new Error("missing required claim");
+  capabilities(payload.att);
+  if (payload.nbf !== undefined && !Number.isFinite(payload.nbf)) throw new Error("invalid nbf");
+  return { payload, signingInput: `${parts[0]}.${parts[1]}`, signature: unb64(parts[2]) };
 }
-async function sigValid(token: string): Promise<boolean> {
-  const [h, b, s] = token.split(".");
-  const p = JSON.parse(new TextDecoder().decode(b64urlDec(b))) as Payload;
-  return await crypto.subtle.verify(
-    "Ed25519",
-    await pubKeyFromDid(p.iss),
-    bs(b64urlDec(s)),
-    bs(enc.encode(`${h}.${b}`)),
+export function decode(token: string): Payload {
+  return parse(token).payload;
+}
+
+function varint(n: number): number[] {
+  const out: number[] = [];
+  do {
+    let b = n & 0x7f;
+    n >>>= 7;
+    if (n) b |= 0x80;
+    out.push(b);
+  } while (n);
+  return out;
+}
+function base32(bytes: Uint8Array): string {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz234567";
+  let bits = 0, value = 0, out = "";
+  for (const byte of bytes) {
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) out += alphabet[(value >>> (bits -= 5)) & 31];
+  }
+  if (bits) out += alphabet[(value << (5 - bits)) & 31];
+  return out;
+}
+export function cidForToken(token: string): string {
+  const digest = blake3(enc.encode(token), { dkLen: 32 });
+  return `b${
+    base32(
+      Uint8Array.from([...varint(1), ...varint(0x55), ...varint(0x1e), ...varint(32), ...digest]),
+    )
+  }`;
+}
+function proof(store: ProofStore | undefined, cid: string): string {
+  const token = store instanceof Map ? store.get(cid) : store?.[cid];
+  if (!token) throw new Error(`missing proof ${cid}`);
+  if (cidForToken(token) !== cid) throw new Error(`wrong CID for proof ${cid}`);
+  return token;
+}
+async function verifyAt(token: string, opts: VerifyOpts, seen: Set<string>): Promise<Payload> {
+  if (seen.has(token)) throw new Error("cyclic proof chain");
+  seen.add(token);
+  const { payload, signingInput, signature } = parse(token);
+  const issuer = payload.iss.split("#")[0];
+  const key = await crypto.subtle.importKey(
+    "raw",
+    source(didKeyToEd25519(issuer)),
+    { name: "Ed25519" },
+    false,
+    ["verify"],
   );
-}
-
-// --- attenuation: is `child` a narrowing of `parent`? ---
-function withCovers(parent: string, child: string): boolean {
-  if (parent === child) return true;
-  if (parent.endsWith("*")) return child.startsWith(parent.slice(0, -1));
-  return false;
-}
-function canCovers(parent: string, child: string): boolean {
-  if (parent === "*") return true;
-  const p = parent.split("/"), c = child.split("/");
-  if (p.length > c.length) return false;
-  return p.every((seg, i) => seg === c[i]); // parent path is a prefix of child path
-}
-function caveatsNarrower(parent: Caveats | undefined, child: Caveats | undefined): string | null {
-  const pr = parent ?? {}, ch = child ?? {};
-  if (pr.maxRate !== undefined && (ch.maxRate === undefined || ch.maxRate > pr.maxRate)) {
-    return "child maxRate exceeds parent";
-  }
-  if (pr.until !== undefined && (ch.until === undefined || ch.until > pr.until)) {
-    return "child until later than parent";
-  }
-  if (pr.sink !== undefined && ch.sink !== pr.sink) return "child sink differs from parent";
-  return null;
-}
-function attenuates(parent: Capability, child: Capability): boolean {
-  return withCovers(parent.with, child.with) && canCovers(parent.can, child.can) &&
-    caveatsNarrower(parent.nb, child.nb) === null;
-}
-
-// --- offline verification of the whole chain, trust-anchored at `root` did ---
-export interface VerifyOpts {
-  root: string;
-  now?: number;
-}
-export async function verify(token: string, opts: VerifyOpts): Promise<Payload> {
+  if (
+    !await crypto.subtle.verify("Ed25519", key, source(signature), source(enc.encode(signingInput)))
+  ) throw new Error("bad signature");
   const now = opts.now ?? Math.floor(Date.now() / 1000);
-  const p = decode(token);
-  if (!await sigValid(token)) throw new Error(`bad signature for ${p.iss}`);
-  if (p.nbf && now < p.nbf) throw new Error("token not yet valid (nbf)");
-  if (now >= p.exp) throw new Error("token expired");
-  if (p.prf.length === 0) {
-    if (p.iss !== opts.root) throw new Error(`root issuer ${p.iss} is not the trusted root`);
-    return p;
+  if (payload.nbf !== undefined && now < payload.nbf) throw new Error("token not yet valid");
+  if (now >= payload.exp) throw new Error("token expired");
+  const children = capabilities(payload.att);
+  if (payload.prf.length === 0) {
+    if (issuer !== opts.root) throw new Error("root issuer is not trusted");
+    return payload;
   }
-  for (const proof of p.prf) {
-    const parent = await verify(proof, opts); // recurse: validates parent chain to root
-    if (p.iss !== parent.aud) {
-      throw new Error(`chain break: ${p.iss} is not the audience of its proof (${parent.aud})`);
-    }
-    for (const cap of p.att) {
-      if (!parent.att.some((pc) => attenuates(pc, cap))) {
-        throw new Error(
-          `capability {${cap.with} ${cap.can}} is not attenuated from any parent grant`,
-        );
+  for (const cid of payload.prf) {
+    if (typeof cid !== "string") throw new Error("invalid proof CID");
+    const parentToken = proof(opts.proofs, cid);
+    const parent = await verifyAt(parentToken, opts, new Set(seen));
+    if (issuer !== parent.aud) throw new Error("delegation issuer does not equal parent audience");
+    if (payload.exp > parent.exp) throw new Error("delegation expiry widens parent");
+    if ((payload.nbf ?? 0) < (parent.nbf ?? 0)) throw new Error("delegation nbf widens parent");
+    const parents = capabilities(parent.att);
+    for (const child of children) {
+      if (!parents.some((p) => covered(p, child))) {
+        throw new Error("capability is not attenuated from parent");
       }
     }
   }
-  return p;
+  return payload;
+}
+export async function verify(token: string, opts: VerifyOpts): Promise<Payload> {
+  return await verifyAt(token, opts, new Set());
 }
 
 export interface Invocation {
   with: string;
   can: string;
-  rate?: number;
-  sink?: string;
+  caveats?: Caveat;
 }
-// verify the chain AND that a leaf capability actually authorizes this invocation.
 export async function canInvoke(
   token: string,
   req: Invocation,
   opts: VerifyOpts,
 ): Promise<Capability> {
-  const now = opts.now ?? Math.floor(Date.now() / 1000);
-  const p = await verify(token, opts);
-  for (const cap of p.att) {
-    if (!withCovers(cap.with, req.with) || !canCovers(cap.can, req.can)) continue;
-    const nb = cap.nb ?? {};
-    if (nb.maxRate !== undefined && req.rate !== undefined && req.rate > nb.maxRate) continue;
-    if (nb.until !== undefined && now >= nb.until) continue;
-    if (nb.sink !== undefined && req.sink !== nb.sink) continue;
-    return cap;
+  const payload = await verify(token, opts);
+  for (const cap of capabilities(payload.att)) {
+    if (
+      extendsResource(cap.with, req.with) && cap.can === req.can &&
+      (cap.caveats ?? [{}]).some((c) => caveatsNarrower(c, req.caveats ?? {}))
+    ) return cap;
   }
   throw new Error(`no capability authorizes ${req.can} on ${req.with}`);
 }
