@@ -35,8 +35,8 @@
 
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
 import { configureEgress, egressFetch, egressProxy } from "./egress.ts";
-import { AmbiguousAccountError, deleteJar, entriesForExport, getJar, initVault, jarsFor, markMigrating, setJar, strandedJars } from "./vault.ts";
-import { initTokens, listTokens, mint, revoke, tokensForSubject, type Token, verify, verifyCap } from "./tokens.ts";
+import { AmbiguousAccountError, deleteJar, deleteMigrating, entriesForExport, getJar, initVault, installEntries, jarsFor, markMigrating, setJar, strandedJars } from "./vault.ts";
+import { importTokens, initTokens, listTokens, mint, revoke, revokeSubject, tokensForSubject, type Token, verify, verifyCap } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit, pruneAudit } from "./audit.ts";
 import { formatAuditDecision, gate, Scope, STATIC_LISTING } from "./listing.ts";
@@ -70,6 +70,7 @@ import { proposeIngredients } from "./promoter.ts";
 import { approveChallenge, createChallenge, denyChallenge, getChallenge, initStepup, recordTokenUse, score, wasFirstUse } from "./stepup.ts";
 import { createLocatorStore, locatorGetResponse, type LocatorStore } from "./locator.ts";
 import { encryptExport } from "./export.ts";
+import { decryptMigration, signReceipt, verifyReceipt, type ConfirmReceipt, type EncryptedExport } from "./migration.ts";
 
 let ready = false;
 let ownerSecret = "";
@@ -604,6 +605,49 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       await markMigrating(target);
       await audit("export", { subject: target, entries: vault.length, grants: grants.length });
       return json({ ok: true, subject: target, entries: vault.length, export: encrypted });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+  }
+
+  if (req.method === "POST" && path === "/api/import") {
+    if (!session?.subject.startsWith("did:key:")) return json({ error: "did:key ceremony required" }, 401);
+    const body = await req.json().catch(() => null) as { export?: EncryptedExport } | null;
+    const envelope = body?.export || body as unknown as EncryptedExport;
+    const privateKey = ctx.env.MIGRATION_X25519_PRIVATE_KEY;
+    if (!privateKey) return json({ error: "destination migration key is not configured" }, 503);
+    try {
+      const bundle = await decryptMigration(envelope, privateKey);
+      if (bundle.subject !== session.subject) return json({ error: "destination session does not prove bundle subject" }, 403);
+      const podDid = ctx.env.POD_DID || "";
+      const jwkText = ctx.env.POD_SIGNING_PRIVATE_JWK || "";
+      if (!podDid || !jwkText) return json({ error: "destination pod signing identity is not configured" }, 503);
+      let signingJwk: JsonWebKey;
+      try { signingJwk = JSON.parse(jwkText); } catch { return json({ error: "malformed destination pod signing key" }, 503); }
+      const entries = bundle.vault.map((entry) => ({ ...entry, jar: entry.jar }));
+      const imported = await installEntries(bundle.subject, entries);
+      const grants = bundle.grants as unknown as Token[];
+      const grantCount = await importTokens(grants);
+      const importedAt = new Date().toISOString();
+      const receipt = await signReceipt({ subject: bundle.subject, destPod: podDid, importedAt }, signingJwk);
+      await audit("import", { subject: bundle.subject, entries: imported, grants: grantCount });
+      return json({ ok: true, subject: bundle.subject, entries: imported, grants: grantCount, receipt });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+  }
+
+  if (req.method === "POST" && path === "/api/export/confirm") {
+    const acting = subjectOf();
+    if (!acting) return json({ error: "unauthorized" }, 401);
+    const receipt = await req.json().catch(() => null) as ConfirmReceipt | null;
+    if (!receipt || (acting !== "owner" && receipt.subject !== acting)) return json({ error: "receipt subject mismatch" }, 403);
+    try {
+      if (!await verifyReceipt(receipt)) return json({ error: "invalid destination receipt" }, 400);
+      const deleted = await deleteMigrating(receipt.subject);
+      const revoked = await revokeSubject(receipt.subject);
+      await audit("export.confirm", { subject: receipt.subject, deleted, revoked, destPod: receipt.destPod });
+      return json({ ok: true, subject: receipt.subject, deleted, revoked });
     } catch (e) {
       return json({ error: (e as Error).message }, 400);
     }
