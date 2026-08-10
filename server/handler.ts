@@ -14,6 +14,8 @@
 //   POST   /api/tokens/:token/tighten          signed-in user — revoke and re-mint with a named ingredient
 //   GET    /api/scopes                        public — enforced scope-ingredient ledger + app consumes/offers (#88)
 //   GET    /api/scopes/:id                    public — one enforced ingredient (404 if unknown)
+//   GET    /api/locator/:did                   public — RFC 0013 home pointer (200) or MOVED tombstone (410)
+//   PUT    /api/locator/:did {home|movedTo}    owner — set/refresh home (import) or write tombstone (export-confirm)
 //   GET    /scopes                            public — the composable-utilities panel (rendered view of /api/scopes, #88)
 //   POST   /api/connect   {plugin,subject?,app?}   app — start the grant handshake
 //   GET    /api/connect/:requestId            app — poll status (token once approved)
@@ -59,12 +61,14 @@ import { appDeclarations, pluginCapabilities, scopeIngredient, scopeIngredients,
 import { deletePersistedSite, hydratePersistedSites, listSites, persistSite, registerSite, unregisterSite } from "./sites.ts";
 import { proposeIngredients } from "./promoter.ts";
 import { approveChallenge, createChallenge, denyChallenge, getChallenge, initStepup, recordTokenUse, score, wasFirstUse } from "./stepup.ts";
+import { createLocatorStore, locatorGetResponse, type LocatorStore } from "./locator.ts";
 
 let ready = false;
 let ownerSecret = "";
 let publicUrl = "";
 let browserSpiUrl = "";
 let browserSpiSecret = "";
+let locator: LocatorStore | null = null;
 
 export interface HandlerCtx { env: Record<string, string>; dataDir?: string; }
 
@@ -97,6 +101,7 @@ async function init(env: Record<string, string>, dataDir: string) {
   configureReddit(env);
   configureAmazon(env);
   await initListings(dataDir);
+  locator = await createLocatorStore(dataDir);
   await initEval(dataDir);
   const nSites = hydratePersistedSites(dataDir);
   if (nSites) console.log(`[init] hydrated ${nSites} runtime site(s) from ${dataDir}/sites`);
@@ -460,6 +465,27 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   // RFC 0007 §5.2: listing store
   if (req.method === "GET" && path === "/api/listings") {
     return json({ listings: getListings() });
+  }
+
+  // --- RFC 0013 (discovery): locator records. A signed HOME pointer per subject DID, or a MOVED
+  // tombstone once the subject migrated to another pod. A stale read on the origin returns 410
+  // + the tombstone so a holder of the old URL can follow `movedTo` (exactly once). Writes are
+  // owner-only: import sets the home record on the destination; export-confirm writes the
+  // tombstone on the origin. Records are Ed25519-signed by this pod's own did:key (in `iss`). ---
+  if (path.startsWith("/api/locator/")) {
+    if (!locator) return json({ error: "locator store not initialized" }, 500);
+    const did = decodeURIComponent(path.slice("/api/locator/".length));
+    if (req.method === "GET" && did) {
+      const { status, body } = locatorGetResponse(locator.get(did));
+      return json(body, status);
+    }
+    if ((req.method === "PUT" || req.method === "POST") && did) {
+      if (!isOwner(req)) return json({ error: "owner only" }, 401);
+      const body = await req.json().catch(() => null) as { home?: string; movedTo?: string; seq?: number } | null;
+      if (body?.home) return json(await locator.setHome(did, body.home, body.seq));
+      if (body?.movedTo) return json(await locator.setMoved(did, body.movedTo, body.seq));
+      return json({ error: "provide {home:<url>} or {movedTo:<url>}" }, 400);
+    }
   }
 
   // --- declarative sites (RFC 0012): register a longtail site as data, at runtime, no deploy ---

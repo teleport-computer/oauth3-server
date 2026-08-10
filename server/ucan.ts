@@ -90,6 +90,32 @@ export async function generateKeypair(): Promise<Keypair> {
   };
 }
 
+// Raw Ed25519 sign/verify over arbitrary bytes — for self-signed records whose payload is
+// not a UCAN (e.g. RFC 0013 locator records). did:key identifies the signer. Reuses the
+// did:key codec above so all Ed25519/did:key math lives in one place. Adapted to #155's
+// ucan.ts rewrite: bs() -> source() (line ~45), and a private pubKeyFromDid mirroring the
+// importKey pattern verifyAt uses, so #154 locator records and #155's verifier coexist with
+// no duplicate sign().
+export async function signBytes(privateKey: CryptoKey, data: Uint8Array): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.sign("Ed25519", privateKey, source(data)));
+}
+async function pubKeyFromDid(did: string): Promise<CryptoKey> {
+  return await crypto.subtle.importKey(
+    "raw",
+    source(didKeyToEd25519(did.split("#")[0])),
+    { name: "Ed25519" },
+    false,
+    ["verify"],
+  );
+}
+export async function verifySig(pubDid: string, data: Uint8Array, sig: Uint8Array): Promise<boolean> {
+  try {
+    return await crypto.subtle.verify("Ed25519", await pubKeyFromDid(pubDid), source(sig), source(data));
+  } catch {
+    return false;
+  }
+}
+
 function resourceParts(resource: string) {
   const m = /^(tinycloud:key:[^/]+):([^/?#]+)(?:\/([^?#]*))?(?:\?([^#]*))?(?:#(.*))?$/.exec(
     resource,
