@@ -66,3 +66,7 @@ export async function revoke(token: string): Promise<boolean> {
 export function listTokens(): Token[] {
   return Object.values(tokens).sort((a, b) => b.createdAt - a.createdAt);
 }
+
+export function tokensForSubject(subject: string): Token[] {
+  return listTokens().filter((token) => token.subject === subject);
+}

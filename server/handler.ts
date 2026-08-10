@@ -10,6 +10,7 @@
 //   DELETE /api/tokens/:token                 owner — revoke a token
 //   POST   /api/introspect                    bearer token — verify a scoped token
 //   GET    /api/audit                         owner — audit log
+//   POST   /api/export {destinationPublicKey,subject?} owner/did:key — encrypted migration bundle
 //   POST   /api/audit/prune                    owner — apply retention policy, report before/after sizes (#120)
 //   GET    /api/promote                       signed-in user — proposed scope ingredients from observed reads
 //   POST   /api/tokens/:token/tighten          signed-in user — revoke and re-mint with a named ingredient
@@ -34,8 +35,8 @@
 
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
 import { configureEgress, egressFetch, egressProxy } from "./egress.ts";
-import { AmbiguousAccountError, deleteJar, getJar, initVault, jarsFor, setJar, strandedJars } from "./vault.ts";
-import { initTokens, listTokens, mint, revoke, type Token, verify, verifyCap } from "./tokens.ts";
+import { AmbiguousAccountError, deleteJar, entriesForExport, getJar, initVault, jarsFor, markMigrating, setJar, strandedJars } from "./vault.ts";
+import { initTokens, listTokens, mint, revoke, tokensForSubject, type Token, verify, verifyCap } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit, pruneAudit } from "./audit.ts";
 import { formatAuditDecision, gate, Scope, STATIC_LISTING } from "./listing.ts";
@@ -68,6 +69,7 @@ import { deletePersistedSite, hydratePersistedSites, listSites, persistSite, reg
 import { proposeIngredients } from "./promoter.ts";
 import { approveChallenge, createChallenge, denyChallenge, getChallenge, initStepup, recordTokenUse, score, wasFirstUse } from "./stepup.ts";
 import { createLocatorStore, locatorGetResponse, type LocatorStore } from "./locator.ts";
+import { encryptExport } from "./export.ts";
 
 let ready = false;
 let ownerSecret = "";
@@ -578,6 +580,33 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     await setJar(subj, plugin.id, account, body.cookies);
     await audit("cookies.sync", { subject: subj, plugin: plugin.id, account, count: Object.keys(body.cookies).length });
     return json({ ok: true, plugin: plugin.id, account, count: Object.keys(body.cookies).length });
+  }
+
+  // Self-host migration export. The bundle exists only in memory; the response is an envelope
+  // encrypted to the destination key, and only then are the source rows marked for import.
+  if (req.method === "POST" && path === "/api/export") {
+    const acting = subjectOf();
+    // The export ceremony accepts the owner secret or a did:key login challenge. A generic
+    // local userKey session is deliberately insufficient for moving the whole vault.
+    if (!acting || (!isOwner(req) && !session?.subject.startsWith("did:key:"))) return json({ error: "owner secret or did:key ceremony required" }, 401);
+    const body = await req.json().catch(() => null) as { destinationPublicKey?: unknown; destinationX25519PublicKey?: unknown; subject?: unknown } | null;
+    const target = acting === "owner" && typeof body?.subject === "string" ? body.subject : acting;
+    const vault = entriesForExport(target);
+    const grants = tokensForSubject(target);
+    const delegationJwts = grants.filter((grant) => grant.token.split(".").length === 3).map((grant) => grant.token);
+    if (!vault.length && !grants.length) return json({ error: "unknown subject" }, 404);
+    const provenance: Record<string, { capturedVia: string }> = {};
+    for (const entry of vault) {
+      provenance[`${entry.plugin}:${entry.account}`] = { capturedVia: "unknown" };
+    }
+    try {
+      const encrypted = await encryptExport({ version: 0, subject: target, exportedAt: new Date().toISOString(), vault, grants, delegationJwts, provenance }, body?.destinationPublicKey ?? body?.destinationX25519PublicKey);
+      await markMigrating(target);
+      await audit("export", { subject: target, entries: vault.length, grants: grants.length });
+      return json({ ok: true, subject: target, entries: vault.length, export: encrypted });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
   }
 
   // Wipe a jar — your own by default; owner may target any subject via ?subject=.
