@@ -122,6 +122,13 @@ function json(obj: unknown, status = 200): Response {
     headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
   });
 }
+
+function jsonWithHeaders(obj: unknown, extra: Record<string, string>, status = 200): Response {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", ...extra },
+  });
+}
 // #131: a scoped token MUST carry a subject. The old `t.subject ?? "owner"` silently read the
 // OWNER's (usually stale) jar and then blamed the user's cookies — the single biggest cause of
 // bogus "app is broken" reports. No fallback: reject a subjectless token. `t` is null only on the
@@ -1106,6 +1113,47 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
     }
+  }
+
+  const sub = path.match(/^\/api\/reddit\/sub\/([^/]+)$/);
+  if (req.method === "GET" && sub) {
+    const plugin = getPlugin("reddit");
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verify(bearer, "reddit");
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, "reddit", "sub", bearer); if (denied) return denied;
+    const subj = jarSubject(t); if (subj instanceof Response) return subj;
+    const rj = readJar(subj, "reddit", t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    if (!plugin?.loggedIn(rj.jar)) return json({ error: "not logged in to reddit" }, 409);
+    const sort = url.searchParams.get("sort") || "hot";
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 25) || 25, 1), 100);
+    try {
+      const result = await plugin.subreddit!(rj.jar, decodeURIComponent(sub[1]), sort, limit, url.searchParams.get("t") || undefined);
+      if (t && !isOwner(req)) await recordTokenUse(bearer, "reddit");
+      await audit("read", { plugin: "reddit", item: "sub", by: t ? (t.app || t.subject || "token") : "owner" });
+      return jsonWithHeaders({ plugin: "reddit", items: result.items, data: result.items }, result.rateLimitHeaders);
+    } catch (e) { return json({ error: (e as Error).message }, 502); }
+  }
+
+  if (req.method === "GET" && path === "/api/reddit/search") {
+    const plugin = getPlugin("reddit");
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const t = verify(bearer, "reddit");
+    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+    const denied = await gateRead(t, "reddit", "search", bearer); if (denied) return denied;
+    const subj = jarSubject(t); if (subj instanceof Response) return subj;
+    const rj = readJar(subj, "reddit", t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    if (!plugin?.loggedIn(rj.jar)) return json({ error: "not logged in to reddit" }, 409);
+    const query = url.searchParams.get("q") || "";
+    if (!query) return json({ error: "q is required" }, 400);
+    const sort = url.searchParams.get("sort") || "relevance";
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit") || 10) || 10, 1), 100);
+    try {
+      const result = await plugin.search!(rj.jar, query, url.searchParams.get("sub") || undefined, sort, limit);
+      if (t && !isOwner(req)) await recordTokenUse(bearer, "reddit");
+      await audit("read", { plugin: "reddit", item: "search", by: t ? (t.app || t.subject || "token") : "owner" });
+      return jsonWithHeaders({ plugin: "reddit", items: result.items, data: result.items }, result.rateLimitHeaders);
+    } catch (e) { return json({ error: (e as Error).message }, 502); }
   }
 
   // --- google-calendar event-scoped WRITE (RFC: edit-on-behalf, attenuated to one event).

@@ -43,6 +43,15 @@ const SAVED = {
 function mockReddit(req: Request): Response {
   const u = new URL(req.url);
   if (u.pathname === "/api/me.json") return Response.json(ME);
+  if (u.pathname === "/r/test/hot.json" || u.pathname === "/search.json") {
+    const item = {
+      id: "abc", title: "a listed post", score: 42, num_comments: 7, created_utc: 1700000000,
+      permalink: "/r/test/abc", url: "https://example.com/abc", author: "poster", subreddit: "test",
+    };
+    return new Response(JSON.stringify({ data: { children: [{ kind: "t3", data: item }] } }), {
+      headers: { "Content-Type": "application/json", "x-ratelimit-used": "3", "x-ratelimit-remaining": "97" },
+    });
+  }
   if (u.pathname.startsWith("/user/") && u.pathname.endsWith("/saved.json")) {
     return Response.json(SAVED);
   }
@@ -101,6 +110,17 @@ Deno.test("reddit karma: saved-posts listItems still works (regression)", async 
   assertEquals(items.length, 1);
   assertEquals(items[0].id, "t3_abc");
   assertEquals(items[0].title, "a saved post");
+});
+
+Deno.test("reddit read: listing and search preserve item shape and rate limits", async () => {
+  const listing = await redditPlugin.subreddit!({ reddit_session: "x" }, "test", "hot", 25);
+  assertEquals(listing.items[0], {
+    id: "abc", title: "a listed post", score: 42, num_comments: 7, created: 1700000000,
+    permalink: "/r/test/abc", url: "https://example.com/abc", author: "poster", subreddit: "test",
+  });
+  assertEquals(listing.rateLimitHeaders, { "x-ratelimit-used": "3", "x-ratelimit-remaining": "97" });
+  const search = await redditPlugin.search!({ reddit_session: "x" }, "term", undefined, "relevance", 10);
+  assertEquals(search.items.length, 1);
 });
 
 // --- handler / route tests (in-process; in-memory vault via dataDir: "") ---
@@ -181,6 +201,22 @@ Deno.test("reddit karma: reddit:karma-scoped token CANNOT read saved posts", asy
   assertEquals(r.status, 403);
 });
 
+Deno.test("reddit read: reddit:read permits listings but not account/items", async () => {
+  const t = await mint("reddit", "owner", "read-demo", ["reddit:read"]);
+  recordTokenUse(t.token, "reddit");
+  assertEquals((await call("GET", "/api/reddit/sub/test?sort=hot&limit=25", { bearer: t.token })).status, 200);
+  assertEquals((await call("GET", "/api/reddit/search?q=term", { bearer: t.token })).status, 200);
+  assertEquals((await call("GET", "/api/reddit/account", { bearer: t.token })).status, 403);
+  assertEquals((await call("GET", "/api/reddit/items", { bearer: t.token })).status, 403);
+});
+
+Deno.test("reddit read: reddit:karma cannot read listings", async () => {
+  const t = await mint("reddit", "owner", "karma-no-list", ["reddit:karma"]);
+  recordTokenUse(t.token, "reddit");
+  assertEquals((await call("GET", "/api/reddit/sub/test", { bearer: t.token })).status, 403);
+  assertEquals((await call("GET", "/api/reddit/search?q=term", { bearer: t.token })).status, 403);
+});
+
 Deno.test("reddit karma: /api/plugins advertises account support", async () => {
   const r = await call("GET", "/api/plugins", { bearer: OWNER });
   assertEquals(r.status, 200);
@@ -197,6 +233,7 @@ Deno.test("reddit karma: /api/scopes lists reddit:karma ingredient", async () =>
   const j = await r.json();
   const ids: string[] = j.scopes.map((s: { id: string }) => s.id);
   assertNotEquals(ids.indexOf("reddit:karma"), -1);
+  assertNotEquals(ids.indexOf("reddit:read"), -1);
 });
 
 Deno.test("reddit karma: stop mock server", async () => {

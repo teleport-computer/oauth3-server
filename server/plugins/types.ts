@@ -19,6 +19,23 @@ export interface PluginListOptions {
   pageSize?: number;
 }
 
+export interface RedditListingItem {
+  id: string;
+  title: string;
+  score: number;
+  num_comments: number;
+  created: number;
+  permalink: string;
+  url: string;
+  author: string;
+  subreddit?: string;
+}
+
+export interface RedditListingResult {
+  items: RedditListingItem[];
+  rateLimitHeaders: Record<string, string>;
+}
+
 // #98: the amazon cart-substitute write. removeAsin is the active-cart line to remove;
 // addAsin is the comparable replacement added at `qty`. Server-side enforced (price band +
 // same category + qty bound) before the network write.
@@ -71,6 +88,8 @@ export interface Plugin {
   // username + karma breakdown). The narrow surface behind a scope ingredient like
   // `reddit:karma`. Gated at the handler's read chokepoint (readKind "account") like /items.
   account?(jar: Jar): Promise<PluginAccount>;
+  subreddit?(jar: Jar, name: string, sort: string, limit: number, t?: string): Promise<RedditListingResult>;
+  search?(jar: Jar, query: string, subreddit: string | undefined, sort: string, limit: number): Promise<RedditListingResult>;
   // Optional live-follow surface: the currently-live item's recent segments (with
   // monotonic `order` for incremental polling) plus any shared-screen frames.
   live?(jar: Jar, after: number): Promise<unknown>;
