@@ -29,7 +29,17 @@ export const SCOPE_INGREDIENTS: Record<string, { plugin: string; reads: string[]
       plugin: "youtube",
       reads: ["feed"], // the /feed reconstruction of watch history (videos + Shorts)
       label:
-        "read-only · your watch history (videos and Shorts) · not your subscriptions, likes, comments, playlists, or uploads",
+        "read-only · your watch history (videos and Shorts) · not your liked videos, subscriptions, comments, playlists, or uploads",
+    },
+    // #144: the liked-videos read. A distinct read chokepoint (readKind "liked" at
+    // /api/youtube/liked) from watch history, so a history-only token CANNOT reach liked
+    // videos and vice versa — the confinement is the point. The label lists what's OUT so the
+    // approve dialog can't promise more than the cap grants (RFC 0004 anti-hollow-green).
+    "youtube:liked": {
+      plugin: "youtube",
+      reads: ["liked"], // GET /api/youtube/liked — the owner's liked-videos playlist (LL)
+      label:
+        "read-only · your liked videos (id, title, channel, length) · not your watch history, subscriptions, comments, playlists, or uploads",
     },
     "calendar:free-busy": {
       plugin: "google-calendar",
@@ -75,7 +85,7 @@ export const PLUGIN_CAPABILITIES: Record<string, { plugin: string; statement: st
   youtube: {
     plugin: "youtube",
     statement:
-      "CAN read your watch history (videos and Shorts, each flagged isShort) and a logged-in screenshot of youtube.com. CANNOT like, subscribe, comment, remove from history, or upload.",
+      "CAN read your watch history (videos and Shorts, each flagged isShort), your liked videos (id, title, channel, length), and a logged-in screenshot of youtube.com. CANNOT like, subscribe, comment, remove from history, or upload.",
   },
   reddit: {
     plugin: "reddit",
