@@ -53,7 +53,19 @@ oauth3-server runs as a tee-daemon **project** (no dedicated CVM).
 > `BROWSER_SPI_URL`/`BROWSER_SPI_SECRET` (the SPI secret is mandatory — see the env table above
 > and issue #14). Copy the live file, not this snippet, when deploying.
 
-Ship a build:
+Ship a build (use the script — it reads the live manifest first and carries every field
+forward, so a redeploy can never drop the daemon-injected secrets):
+
+```bash
+bash deploy.sh https://your-daemon.dstack.phala.network [git-ref]
+# token: $TEE_DAEMON_TOKEN or ~/.tee-daemon-staging.env
+```
+
+The script pins the verified manifest (`isolation: container`, `oci_runtime: runc`,
+`listen: {port: 8080}` — path-based routing, no dedicated host port to conflict on),
+builds a flat tarball (`handler.ts` at the root, `deno check`-gated), POSTs it, then
+health-gates `/oauth3/api/health` and verifies the read-back manifest. The manual
+equivalent (do not use — this is how the env got wiped on 2026-08-10):
 
 ```bash
 TOKEN=…; CVM=https://your-daemon.dstack.phala.network
