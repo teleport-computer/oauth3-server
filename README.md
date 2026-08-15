@@ -127,6 +127,7 @@ external data volume, attestation-pinning in the extension, token revocation, au
 
 Reference documentation lives in [`docs/`](docs/):
 
+- [`docs/architecture.md`](docs/architecture.md) — the runtime model: isolated-deno + `env_passthrough` secret injection, the multi-tenant subject model, the sealed per-identity vault, gateway path-routing on `listen.port 8080`.
 - [`docs/http-api.md`](docs/http-api.md) — every endpoint: method, path, auth required, request/response shapes, errors, plus a smoke-check→endpoint map.
 - [`docs/auth.md`](docs/auth.md) — the auth model in one place: owner secret vs web session vs scoped token, and which endpoints accept which.
 - [`docs/plugins.md`](docs/plugins.md) — authoring a plugin: the `Plugin` interface, how scoped-fetch constrains it, the copy-fill-register pattern.
