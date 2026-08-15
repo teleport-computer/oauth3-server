@@ -1,41 +1,41 @@
-# PLAN — oauth3-server #17 (base staging)
+# PLAN — issue #12: nytimes browser-path honesty label (option b)
 
-Issue: "[docs] DEPLOY.md — redeploy recipe + --deny-env + port-conflict gotchas"
+Issue: teleport-computer/oauth3-server#12 (base staging). Scope note in the issue body: option (b)
+ONLY — the honest availability marker. Option (a) (Browser SPI) is #14 and out of scope here.
 
-## Acceptance (from issue body — verbatim, the gate checks this)
-Already covered, so out of scope: `docs/operator.md` §2 documents the tarball+manifest deploy, and
-`docs/plugins.md:95` documents the top-level `Deno.env` rule. Three gotchas from this issue are
-still undocumented:
-- [ ] A deploy doc in `docs/` states all three: (a) why `listen.port` is 8080 and not 3000 (the
-  screenshare-frames port conflict), (b) that an empty `container_id` in `/_api/projects` does not
-  mean the project is down, (c) the read-manifest-first rule — a partial manifest took the live
-  instance down for ~1h.
-- [ ] It is reachable from the README "Deploy (tee-daemon)" section, and it extends or links
-  `docs/operator.md` §2 rather than duplicating it.
+Part already on staging (found during pre-flight, 2026-08-15): the `label` string already says
+"NYTimes saved (browser-path)" and `nytimes.ts` already throws the loud datadome-403 error.
+Part NOT done: the structured availability marker in `GET /api/plugins`, and the dashboard row
+treatment. Those are the remaining work.
 
-## Flow (issue)
-1. Open the deploy doc on the branch; confirm each of the three gotchas appears with the concrete
-   value (8080, `container_id`, `GET {node}/_api/projects` first).
-2. Follow the doc top to bottom against staging once; note in the PR any step that did not work
-   as written.
+## Checkboxes (derived from the issue's `## Acceptance`)
+- [ ] `GET /oauth3/api/plugins` on staging: `nytimes` entry carries `"path": "browser"`,
+      `"available": false`; every OTHER plugin entry keeps its current shape (byte-identical).
+- [ ] Dashboard plugin list (`server/dashboard-page.ts`, `renderSites`) renders nytimes as
+      "browser-path — not available on this cookie-only instance" instead of a normal connectable row.
+- [ ] A read attempt still fails loudly, unchanged: `GET /oauth3/api/nytimes/items` returns the
+      datadome 403 message `nytimes.ts` already throws (code path untouched by this diff).
 
-Evidence tier: **0** — docs only, no behavior change.
+## Build steps
+1. `plugins/types.ts`: `path?: "server" | "browser"`, `available?: boolean` on `Plugin`.
+2. `plugins/nytimes.ts`: `path: "browser", available: false`.
+3. `handler.ts` `/api/plugins`: conditional spread — fields only when the plugin declares them
+   (other entries keep their exact current shape).
+4. `dashboard-page.ts` `renderSites`: browser-path row variant (existing pill/item classes, no
+   new hardcoded styles), reuses existing jar meter only for server-path plugins.
+5. Unit test: `/api/plugins` nytimes marker present; other entries unchanged.
 
-## Checklist
-- [x] `docs/deploy.md` — new page: golden rule (`GET {node}/_api/projects` FIRST, why a partial
-      POST wipes daemon-injected `SEAL_KEY`/`OWNER_SECRET` → 500s; the 3 incidents), live-manifest
-      field-by-field table (incl. `listen:8080` vs `port:3000`), the 6-step redeploy recipe
-      (flat tarball, manifest-minimal-edit, health gate + `/_api/version` pin), gotcha (a)
-      screenshare-frames owns 3000 → `-8080` ingress baked into `PUBLIC_URL`, gotcha (b) empty
-      `container_id` ≠ down (verified live: `""` while health=200), persistence notes
-      (`DATA_DIR`/`vault.sealed`, per-identity `/api/plugins`).
-- [x] Links, not duplication: README "Deploy (tee-daemon)" section points at it; `docs/operator.md`
-      §2 carries a back-pointer ("Redeploying an existing instance?"); deploy.md itself links
-      operator.md §2 / §3 / §5 and plugins.md instead of restating them.
-- [x] Flow 1: each gotcha appears with the concrete value (8080, `container_id`, `GET …/_api/projects`
-      first) — see `.evidence/issue-17/tier0-deploy-doc.md`.
-- [x] Flow 2: doc followed top-to-bottom against staging once — deploy of `staging-oa-17` via the
-      codified script (`deploy-staging-oauth3.sh`), health-gated, `/_api/version` pinned to this
-      branch's SHA; deviations noted in the evidence file + PR.
-- [x] `deno check server/main.ts` clean; `deno task test` green (docs-only change, no runtime
-      files touched).
+## Verify (Tier 2 — dashboard row is user-visible)
+- `deno check server/main.ts`; `deno task test` green (log to ~/paseo-batch/out/oa-12/test.log).
+- Deploy via `bash ~/paseo-batch/deploy-staging-oauth3.sh staging-oa-12` (NEVER a hand-rolled manifest).
+- Tier 1 transcript: `GET /api/plugins` entry paste, pinned `/_api/version` == branch commit;
+  read-attempt transcript (login → cookies sync (sample jar) → connect → approve → first read
+  409 challenge_pending [PR #99 still open, step-up live] → challenge approve → read → loud
+  datadome 403 message, unchanged).
+- Tier 2 walk: envoy bridge (:3002, flock), sign in as u-swarm, `/oauth3/dashboard`, assert
+  location.href, screenshot the nytimes row; `test -s` every PNG; `.evidence/issue-12/` +
+  flow.md; embed raw.githubusercontent URLs in the PR body.
+
+## Ship
+- PR → base `staging`; issue `ready` → `in-review`; label PR `ready-to-merge` only when tier
+  evidence exists and is committed. NEVER merge.

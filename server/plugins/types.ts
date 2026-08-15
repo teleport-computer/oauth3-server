@@ -57,6 +57,14 @@ export interface Plugin {
   label: string; // human, e.g. "ShapeRotator (Otter.ai)"
   cookieDomains: string[]; // extension grabs the WHOLE jar for these, e.g. [".otter.ai"]
   renderUrl?: string; // page to load for /screenshot; defaults to https://www.<cookieDomain>
+  // #12: which execution path a read REQUIRES. "browser" (default "server" when unset) means
+  // the read is only fulfillable through the Browser SPI carrying the real cookie — a
+  // cookie-only instance (this pod) replaying over HTTP is bot-blocked and CANNOT serve it.
+  // Surfaced verbatim by GET /api/plugins so listings/dashboards say so instead of reading
+  // as a working connectable site. `available` is the instance's honest answer for this path
+  // (false for browser-path plugins until the Browser SPI lands, #14).
+  path?: "server" | "browser";
+  available?: boolean;
   loggedIn(jar: Jar): boolean; // cheap presence check on a key cookie
   // Synchronous, offline account-id derivation from the jar (#111): the vault keys a jar
   // under `${subject}:${plugin}:${account}`, and `account` is DERIVED from the jar itself
