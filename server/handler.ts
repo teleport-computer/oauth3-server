@@ -498,6 +498,10 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return json({
       plugins: allPlugins().map((p) => ({
         id: p.id, label: p.label, cookieDomains: p.cookieDomains, account: !!p.account,
+        // #12: availability marker, only when the plugin declares it — every other entry
+        // keeps its exact current shape.
+        ...(p.path ? { path: p.path } : {}),
+        ...(p.available === false ? { available: false } : {}),
         // #111: one identity may hold several accounts per plugin — surface them all.
         jars: subj ? jarsFor(subj, p.id) : [],
       })),

@@ -99,6 +99,10 @@ export function dashboardPage(): string {
 
  function renderSites(ps){const el=$('sites');if(!ps.length){el.innerHTML='<div class="empty">No sites available.</div>';return;}
    el.innerHTML=ps.map(p=>{const j=p.jar||{};const name='<span class=name>'+esc(p.label)+'</span>';
+     // #12: browser-path plugins are NOT connectable on this cookie-only instance — say so
+     // plainly instead of a normal saved/not-saved row that reads as working.
+     if(p.path==='browser'){return '<div class=item><div class=srow>'+name+'<span class="pill warn">browser-path</span></div>'
+       + '<div class=m>browser-path — not available on this cookie-only instance (reads need the browser, #14)</div></div>';}
      if(!j.present){return '<div class=item><div class=srow>'+name+'<span class="pill bad">not saved</span></div></div>';}
      const age=j.updatedAt?Date.now()-j.updatedAt:Infinity;const stale=age>FRESH;
      const frac=stale?1:Math.max(.06,1-age/FRESH);const pct=(frac*100|0);
