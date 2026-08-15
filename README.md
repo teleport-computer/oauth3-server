@@ -95,6 +95,16 @@ jar, seals it at rest (AES-GCM, `SEAL_KEY`), and a background loop polls each pl
 `<dataDir>/transcripts/<plugin>/` every `POLL_INTERVAL_MIN`.
 
 ```bash
+# THE deploy path — reads the live manifest first, carries every field forward, pins the
+# verified manifest (isolation/container, oci_runtime/runc, listen 8080), health-gates.
+bash deploy.sh https://your-daemon.dstack.phala.network [git-ref]
+# token: $TEE_DAEMON_TOKEN or ~/.tee-daemon-staging.env
+```
+
+Manual equivalent (kept for reference; prefer `deploy.sh` — a hand-built manifest wiped
+the live env and took staging down for two days on 2026-08-10):
+
+```bash
 TOKEN=...; CVM=https://your-daemon.dstack.phala.network
 tar czf otter.tgz -C server .
 curl -X POST $CVM/_api/projects -H "Authorization: Bearer $TOKEN" \
