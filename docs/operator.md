@@ -73,6 +73,14 @@ fix). Until that lands: deploy as an `image` runtime, **or** rely on dstack LUKS
 per-project volume isolation for at-rest protection (the daemon derives `SEAL_KEY` from TEE
 material via `GetKey → HKDF` in the intended design).
 
+> **Redeploying an existing instance?** The manifest-preserving redeploy recipe and the three
+daemon-side gotchas live in [`deploy.md`](./deploy.md): why `listen.port` is **8080** (the
+screenshare-frames project owns port 3000 on the node), why an empty `container_id` in
+`/_api/projects` does **not** mean the project is down, and the read-the-live-manifest-first
+rule (`GET {node}/_api/projects` before any POST — a partial manifest wiped the live env and
+500’d the instance for hours). This section covers first-time deploy; that page covers keeping
+it up.
+
 ## 3. Trust postures (dev / source-bound / attested)
 
 These are not three switches on one config — they are three increasingly strong claims an
