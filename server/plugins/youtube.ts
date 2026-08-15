@@ -207,17 +207,18 @@ async function likedVideos(jar: Jar): Promise<PluginItem[]> {
   return out;
 }
 
-// #11: real per-video metadata via the InnerTube player API — the same JSON surface
-// liked() pages through (#144). The /watch HTML page is bot-walled from datacenter
-// egress ("Sign in to confirm you're not a bot"), and regexing a player response out
-// of HTML is as fragile as the ytInitialData parse in listItems; /youtubei/v1/player
-// answers structured JSON for any public id, cookies or not.
-// Key contract: an id YouTube does not resolve answers with NO usable videoDetails
-// (unavailable / private / bot-walled egress) — that MUST throw (the items handler
-// maps it to 502), never return a shaped-but-empty object. Note an UNPLAYABLE video
-// can still carry full videoDetails (embed-gated etc.); presence of title+author is
-// the real "resolved" signal, not playabilityStatus === "OK".
-const INNER_CLIENT_VERSION = "2.20250811.01.00";
+// #11: real per-video metadata via the InnerTube player API. The /watch HTML page
+// AND the InnerTube WEB client are both bot-walled from datacenter egress ("Sign in to
+// confirm you're not a bot" — verified live on staging 2026-08-15), so fetchItem rides
+// the MWEB client (mobile-web), which answers structured JSON for any public id from
+// that same egress. Key contract: an id YouTube does not resolve answers with NO usable
+// videoDetails (unavailable / private / bot-walled) — that MUST throw (the items handler
+// maps it to 502), never return a shaped-but-empty object. An UNPLAYABLE video can still
+// carry full videoDetails (embed-gated etc.); presence of title+author is the real
+// "resolved" signal, not playabilityStatus === "OK".
+const INNER_CLIENT = { clientName: "MWEB", clientVersion: "2.20240726.01.00", hl: "en", gl: "US" };
+const INNER_UA =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1";
 
 export const youtubePlugin: Plugin = {
   id: "youtube",
@@ -260,13 +261,13 @@ export const youtubePlugin: Plugin = {
       method: "POST",
       headers: {
         "Cookie": cookieHeader(jar),
-        "User-Agent": UA,
+        "User-Agent": INNER_UA,
         "Accept": "application/json",
         "Accept-Language": "en-US,en;q=0.9",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        context: { client: { clientName: "WEB", clientVersion: INNER_CLIENT_VERSION, hl: "en", gl: "US" } },
+        context: { client: INNER_CLIENT },
         videoId: id,
       }),
       signal: AbortSignal.timeout(30_000),
