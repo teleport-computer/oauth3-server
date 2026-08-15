@@ -256,7 +256,12 @@ export const youtubePlugin: Plugin = {
   },
 
   // #11: real per-video metadata (see the INNER_CLIENT_VERSION comment above).
+  // #11: real per-video metadata (see the INNER_CLIENT comment above). Sends the
+  // jar-derived SAPISIDHASH when the jar has a SAPISID — the same auth posture as
+  // liked() (#144), live-verified from staging egress: unauthenticated player calls
+  // from that datacenter IP are bot-walled, jar-authenticated ones are not.
   async fetchItem(jar: Jar, id: string): Promise<unknown> {
+    const auth = await sapisidAuth(jar);
     const r = await egressFetch(`${BASE}/youtubei/v1/player?prettyPrint=false`, {
       method: "POST",
       headers: {
@@ -265,6 +270,7 @@ export const youtubePlugin: Plugin = {
         "Accept": "application/json",
         "Accept-Language": "en-US,en;q=0.9",
         "Content-Type": "application/json",
+        ...(auth ? { "Authorization": auth } : {}),
       },
       body: JSON.stringify({
         context: { client: INNER_CLIENT },
