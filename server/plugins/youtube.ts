@@ -89,10 +89,23 @@ export function parseLikedContinuation(body: any): { items: PluginItem[]; cont?:
   return { items: [] };
 }
 
-// SHA-1 -> hex (Web Crypto). Used to build SAPISIDHASH for the InnerTube browse call.
+// SHA-1 -> hex (Web Crypto). Used to build SAPISIDHASH for the InnerTube calls.
 async function sha1hex(s: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(s));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// SAPISIDHASH Authorization for InnerTube — the same derived auth liked() uses (#144),
+// which was live-verified from staging egress: unauthenticated player calls from that
+// datacenter IP are bot-walled ("Sign in to confirm you're not a bot", 2026-08-15),
+// jar-authenticated ones are not. Undefined when the jar has no SAPISID — the call then
+// goes unauthenticated (fine from residential/VPN egress) and a bot-walled answer
+// surfaces as the honest playability error.
+async function sapisidAuth(jar: Jar): Promise<string | undefined> {
+  const sapisid = jar["SAPISID"] || jar["__Secure-3PAPISID"];
+  if (!sapisid) return undefined;
+  const ts = Math.floor(Date.now() / 1000);
+  return `SAPISIDHASH ${ts}_${await sha1hex(`${ts} ${sapisid} ${ORIGIN}`)}`;
 }
 
 function parseHistory(data: any): PluginItem[] {
