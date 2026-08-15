@@ -207,39 +207,17 @@ async function likedVideos(jar: Jar): Promise<PluginItem[]> {
   return out;
 }
 
-// #11: the watch page embeds the full player response as
-// `<script>var ytInitialPlayerResponse = {...};</script>`. A naive `\{[\s\S]+?\}` regex
-// breaks on braces/quotes inside string values, so scan braces with string-escape
-// awareness instead — deterministic for any nesting YouTube ships. `null` = not found.
-export function extractPlayerResponse(html: string): any | null {
-  const i = html.search(/ytInitialPlayerResponse\s*=/);
-  if (i < 0) return null;
-  const start = html.indexOf("{", i);
-  if (start < 0) return null;
-  let depth = 0, inStr = false, esc = false;
-  for (let j = start; j < html.length; j++) {
-    const ch = html[j];
-    if (inStr) {
-      if (esc) esc = false;
-      else if (ch === "\\") esc = true;
-      else if (ch === '"') inStr = false;
-      continue;
-    }
-    if (ch === '"') inStr = true;
-    else if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) {
-        try {
-          return JSON.parse(html.slice(start, j + 1));
-        } catch {
-          return null;
-        }
-      }
-    }
-  }
-  return null;
-}
+// #11: real per-video metadata via the InnerTube player API — the same JSON surface
+// liked() pages through (#144). The /watch HTML page is bot-walled from datacenter
+// egress ("Sign in to confirm you're not a bot"), and regexing a player response out
+// of HTML is as fragile as the ytInitialData parse in listItems; /youtubei/v1/player
+// answers structured JSON for any public id, cookies or not.
+// Key contract: an id YouTube does not resolve answers with NO usable videoDetails
+// (unavailable / private / bot-walled egress) — that MUST throw (the items handler
+// maps it to 502), never return a shaped-but-empty object. Note an UNPLAYABLE video
+// can still carry full videoDetails (embed-gated etc.); presence of title+author is
+// the real "resolved" signal, not playabilityStatus === "OK".
+const INNER_CLIENT_VERSION = "2.20250811.01.00";
 
 export const youtubePlugin: Plugin = {
   id: "youtube",
@@ -276,30 +254,31 @@ export const youtubePlugin: Plugin = {
     return parseHistory(data);
   },
 
-  // #11: real per-video metadata. The watch page serves ytInitialPlayerResponse
-  // (title, channel, length, view count) for ANY public id — cookies or not — so this
-  // works even for a rotted jar. An id YouTube does not resolve answers
-  // playabilityStatus:"ERROR" with no usable videoDetails: that MUST throw (the items
-  // handler maps it to 502), never return a shaped-but-empty object. No fallback shape.
+  // #11: real per-video metadata (see the INNER_CLIENT_VERSION comment above).
   async fetchItem(jar: Jar, id: string): Promise<unknown> {
-    const r = await egressFetch(`${BASE}/watch?v=${encodeURIComponent(id)}`, {
+    const r = await egressFetch(`${BASE}/youtubei/v1/player?prettyPrint=false`, {
+      method: "POST",
       headers: {
         "Cookie": cookieHeader(jar),
         "User-Agent": UA,
-        "Accept": "text/html,application/xhtml+xml",
+        "Accept": "application/json",
         "Accept-Language": "en-US,en;q=0.9",
+        "Content-Type": "application/json",
       },
+      body: JSON.stringify({
+        context: { client: { clientName: "WEB", clientVersion: INNER_CLIENT_VERSION, hl: "en", gl: "US" } },
+        videoId: id,
+      }),
       signal: AbortSignal.timeout(30_000),
     });
-    if (!r.ok) throw new Error(`youtube watch ${id}: ${r.status}`);
-    const pr = extractPlayerResponse(await r.text());
-    if (!pr) throw new Error(`youtube item ${id}: ytInitialPlayerResponse not found`);
-    const status = pr?.playabilityStatus?.status;
-    if (status && status !== "OK") {
-      throw new Error(`youtube item ${id}: ${pr?.playabilityStatus?.reason || status}`);
-    }
+    if (!r.ok) throw new Error(`youtube player ${id}: ${r.status}`);
+    const pr = await r.json().catch(() => null) as any;
+    if (!pr) throw new Error(`youtube item ${id}: player response not JSON`);
     const d = pr?.videoDetails;
-    if (!d?.title || !d?.author) throw new Error(`youtube item ${id} not resolved (no videoDetails)`);
+    if (!d?.title || !d?.author) {
+      const reason = pr?.playabilityStatus?.reason || pr?.playabilityStatus?.status || "no videoDetails";
+      throw new Error(`youtube item ${id}: ${reason}`);
+    }
     return {
       id,
       url: `https://www.youtube.com/watch?v=${id}`,
