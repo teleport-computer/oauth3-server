@@ -1,0 +1,17 @@
+# Tier 1 transcript — issue #11 — 2026-08-15T17:05:00Z
+
+## $ curl -s $B/oauth3/_api/version
+{"service":"oauth3-server","commit":"6b57609"}
+
+## $ curl $B/oauth3/api/youtube/items/jNQXAC9IVRw -H "Authorization: Bearer tok-youtube-…49e944cbc8dc4596b06801c8"
+##   (scoped read token, demo-app handshake, subject u-eaf13541f186c7c5f466dc04e2e5da4b — the swarm-userkey subject holding the youtube jar)
+{"error":"youtube item jNQXAC9IVRw: Sign in to confirm you’re not a bot"}
+# HTTP 502
+
+## $ curl $B/oauth3/api/youtube/items/ZZZZZZZZZZZ  (bogus id)
+{"error":"youtube item ZZZZZZZZZZZ: This video is unavailable"}
+# HTTP 502
+
+## list read (acceptance flow step 2) — jar rotted:
+{"error":"youtube returned not-logged-in — cookies expired"}
+# HTTP 502
