@@ -108,6 +108,12 @@ the image runtime today, not isolated deno (tee-daemon `ISSUES.md` #13, ~4-line 
 Until that lands, either deploy as an `image` runtime, or rely on dstack LUKS2 + per-project
 volume isolation for at-rest protection. Dev supplies both via `.env`.
 
+**Redeploys + daemon gotchas:** see [`docs/deploy.md`](docs/deploy.md) — the manifest-preserving
+redeploy recipe and the three gotchas learned live: why `listen.port` is **8080** (screenshare-frames
+owns port 3000 on the node), why an empty `container_id` in `/_api/projects` does **not** mean the
+project is down, and why you must `GET {node}/_api/projects` and read the live manifest **before
+any POST** (a partial manifest once took the instance down).
+
 ## Status
 
 Built: plugin interface (+ `_template.ts`), Otter + YouTube plugins, sealed cookie vault,
