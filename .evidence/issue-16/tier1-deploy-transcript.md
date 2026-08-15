@@ -120,3 +120,27 @@ matching every sibling project (`egress-probe`, `timing-leak-demo` are `containe
   stayed healthy, `/_api/version` pinned each time); final run — green end-to-end as transcribed
   above. Each failed verify exited non-zero: the script fails loudly rather than reporting an
   unverified deploy.
+
+## 2026-08-15 — rebase re-verification (post-rebase, pins refreshed)
+
+Rebased `staging-oa-16` onto `origin/staging` @ `3c6c82a` (staging advanced through PRs #162/#161/#164/#165
+while this PR waited). Only `PLAN.md` conflicted — a per-issue scratch file fully rewritten by every PR;
+resolved by taking this branch's #16 plan (the #18 plan is preserved in staging history `3c6c82a`).
+`deploy.sh` is **byte-identical** before/after the rebase (`git diff <old-head> <new-head> -- deploy.sh` → empty).
+
+Re-ran the PR's own verification from the rebased head:
+
+- `deno check server/main.ts` — clean.
+- `deno task test` — **174 passed, 0 failed** (172 pre-rebase; the +2 is staging's #162 static-guard
+  test now included — `~/paseo-batch/out/oa-16/test-rebase.log`).
+- Live deploy re-run (`bash deploy.sh <node>` from the rebased worktree, `~/paseo-batch/out/oa-16/deploy-rebase.log`):
+  - POST accepted → `t+5s health=200`, plugins list unchanged (9 plugins).
+  - Read-back verify: `changed fields: ['deployed_at', 'env.GIT_SHA', 'ref', 'tree_hash']` — all
+    tarball/commit-identity fields; `VERIFIED: isolation=container, listen.port=8080, env_passthrough intact,
+    env keys intact`. (`ref` moved because the prior live manifest carried `staging-oa-21` from another
+    worker's deploy; this run built default `HEAD` = the rebased tip.)
+  - **Fresh version pin:** `GET /oauth3/_api/version` → `{"service":"oauth3-server","commit":"7a72008"}` —
+    the rebased deploy.sh-carrying-state head, live at time of writing. (The pin above read `62301e4`, a
+    pre-rebase SHA that no longer exists in the rebased history — superseded by this run, not deleted, so
+    the trail stays honest. This evidence commit follows `7a72008`; the deployed code is identical.)
+- Required-arg refusal re-checked: `bash deploy.sh` → exit 2, same message.
