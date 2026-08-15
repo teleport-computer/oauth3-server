@@ -16,6 +16,13 @@ import { registerRead } from "../reads.ts";
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 const ORIGIN = "https://www.youtube.com";
 
+// Live YouTube base. Override via YOUTUBE_BASE (mock/e2e) through configureYoutube();
+// the watch-page fetch in fetchItem goes through it so tests can point it at 127.0.0.1.
+let BASE = ORIGIN;
+export function configureYoutube(env: Record<string, string>): void {
+  if (env.YOUTUBE_BASE) BASE = env.YOUTUBE_BASE.replace(/\/$/, "");
+}
+
 const item = (id: string, title: string, isShort: boolean): PluginItem => ({ id, title, meta: { isShort } });
 
 // A shorts-shelf entry. Newer builds use shortsLockupViewModel; older use reelItemRenderer.
@@ -200,6 +207,40 @@ async function likedVideos(jar: Jar): Promise<PluginItem[]> {
   return out;
 }
 
+// #11: the watch page embeds the full player response as
+// `<script>var ytInitialPlayerResponse = {...};</script>`. A naive `\{[\s\S]+?\}` regex
+// breaks on braces/quotes inside string values, so scan braces with string-escape
+// awareness instead — deterministic for any nesting YouTube ships. `null` = not found.
+export function extractPlayerResponse(html: string): any | null {
+  const i = html.search(/ytInitialPlayerResponse\s*=/);
+  if (i < 0) return null;
+  const start = html.indexOf("{", i);
+  if (start < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let j = start; j < html.length; j++) {
+    const ch = html[j];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        try {
+          return JSON.parse(html.slice(start, j + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 export const youtubePlugin: Plugin = {
   id: "youtube",
   label: "YouTube history",
@@ -235,8 +276,40 @@ export const youtubePlugin: Plugin = {
     return parseHistory(data);
   },
 
-  fetchItem(_jar: Jar, id: string): Promise<unknown> {
-    return Promise.resolve({ id, url: `https://www.youtube.com/watch?v=${id}` });
+  // #11: real per-video metadata. The watch page serves ytInitialPlayerResponse
+  // (title, channel, length, view count) for ANY public id — cookies or not — so this
+  // works even for a rotted jar. An id YouTube does not resolve answers
+  // playabilityStatus:"ERROR" with no usable videoDetails: that MUST throw (the items
+  // handler maps it to 502), never return a shaped-but-empty object. No fallback shape.
+  async fetchItem(jar: Jar, id: string): Promise<unknown> {
+    const r = await egressFetch(`${BASE}/watch?v=${encodeURIComponent(id)}`, {
+      headers: {
+        "Cookie": cookieHeader(jar),
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!r.ok) throw new Error(`youtube watch ${id}: ${r.status}`);
+    const pr = extractPlayerResponse(await r.text());
+    if (!pr) throw new Error(`youtube item ${id}: ytInitialPlayerResponse not found`);
+    const status = pr?.playabilityStatus?.status;
+    if (status && status !== "OK") {
+      throw new Error(`youtube item ${id}: ${pr?.playabilityStatus?.reason || status}`);
+    }
+    const d = pr?.videoDetails;
+    if (!d?.title || !d?.author) throw new Error(`youtube item ${id} not resolved (no videoDetails)`);
+    return {
+      id,
+      url: `https://www.youtube.com/watch?v=${id}`,
+      title: String(d.title),
+      channel: String(d.author),
+      channelId: d.channelId ? String(d.channelId) : undefined,
+      lengthSeconds: d.lengthSeconds ? String(d.lengthSeconds) : undefined,
+      viewCount: d.viewCount ? String(d.viewCount) : undefined,
+      shortDescription: d.shortDescription ? String(d.shortDescription) : undefined,
+    };
   },
 
 };

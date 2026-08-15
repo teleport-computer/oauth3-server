@@ -1,96 +1,131 @@
-// #144: unit tests for the liked-videos extractors. YouTube's InnerTube shape shifts between
-// builds, so these pin the field paths we rely on (videoId, title.runs[0].text,
-// shortBylineText, lengthText.simpleText) + the continuation-token location for both the
-// first page (ytInitialData) and a browse continuation response. Fixture-based — no network.
+// #11 — youtube fetchItem: real per-video metadata from the watch page.
+// Verified against a LOCAL 127.0.0.1 mock serving pages shaped exactly like YouTube's
+// (the fixture below is trimmed from a real /watch?v=jNQXAC9IVRw response, escapes and
+// nested braces intact, so the brace-scanner is exercised against genuine markup — not
+// a simplified stand-in). Live-YouTube behavior is separately proven on staging in the
+// PR's Tier 1 transcript; these tests pin the contract: real data for a real id, a
+// THROW (not a shaped-but-empty object) for an unresolvable one, and no marker → throw.
 
-import { assert, assertEquals } from "jsr:@std/assert";
-import { parseLikedContinuation, parseLikedItem, parseLikedPage } from "./youtube.ts";
+import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
+import { configureYoutube, extractPlayerResponse, youtubePlugin } from "./youtube.ts";
 
-Deno.test("parseLikedItem: id + title + channel + length from a playlistVideoRenderer", () => {
-  const pvr = {
-    videoId: "dQw4w9WgXcQ",
-    title: { runs: [{ text: "Never Gonna Give You Up (Official Video)" }] },
-    shortBylineText: { runs: [{ text: "Rick Astley" }, { text: " · " }, { text: "Topic" }] },
-    lengthText: { accessibility: { accessibilityData: { label: "3 minutes, 33 seconds" } }, simpleText: "3:33" },
-  };
-  assertEquals(parseLikedItem(pvr), {
-    id: "dQw4w9WgXcQ",
-    title: "Never Gonna Give You Up (Official Video)",
-    meta: { channel: "Rick Astley · Topic", length: "3:33" },
-  });
+// Trimmed-but-faithful: `var ytInitialPlayerResponse =` assignment inside a <script>,
+// with string values carrying \n, \u201c, URLs, and nested objects/thumbnails.
+const ZOO_DETAILS = {
+  videoId: "jNQXAC9IVRw",
+  title: "Me at the zoo",
+  lengthSeconds: "19",
+  channelId: "UC4QobU6STFB0P71PMvOGN5A",
+  shortDescription:
+    'Microplastics are accumulating in human brains at an alarming rate\nhttps://www.youtube.com/watch?v=0PT5c1z3LL8\n\n\u201cNanoplastics and Human Health\u201d',
+  viewCount: "404886875",
+  author: "jawed",
+  isLiveContent: false,
+};
+const okPage = (details: unknown) =>
+  `<html><head><meta charset="utf-8"></head><body><script>var ytInitialPlayerResponse = ${
+    JSON.stringify({
+      playabilityStatus: { status: "OK", playableInEmbed: true },
+      videoDetails: details,
+    })
+  };</script><script>var ytInitialData = {};</script></body></html>`;
+
+const bogusPage =
+  `<html><body><script>var ytInitialPlayerResponse = ${
+    JSON.stringify({
+      playabilityStatus: { status: "ERROR", reason: "This video is unavailable" },
+    })
+  };</script></body></html>`;
+
+const junkPage = "<html><body>some unrelated page</body></html>";
+
+let base = "";
+let server: { shutdown(): Promise<void> } | undefined;
+
+// The mock dispatches on the video id — per-call deterministic, 127.0.0.1 only.
+function mockYoutube(req: Request): Response {
+  const u = new URL(req.url);
+  if (u.pathname !== "/watch") return new Response("not found", { status: 404 });
+  const id = u.searchParams.get("v") ?? "";
+  const page = id === "jNQXAC9IVRw"
+    ? okPage(ZOO_DETAILS)
+    : id === "BRACES1"
+    ? okPage({
+      videoId: "BRACES1",
+      title: 'He said "ok}" then {left} \\o/ }', // braces + escaped quote INSIDE strings
+      author: 'chan}"nel',
+      channelId: "UCx",
+      lengthSeconds: "61",
+      viewCount: "7",
+      shortDescription: "}{\"",
+    })
+    : id === "ZZZZZZZZZZZ"
+    ? bogusPage
+    : junkPage;
+  return new Response(page, { status: 200, headers: { "Content-Type": "text/html" } });
+}
+
+Deno.test("youtube fetchItem: start mock server", async () => {
+  const ready = Promise.withResolvers<string>();
+  server = Deno.serve(
+    { port: 0, hostname: "127.0.0.1", onListen: (a) => ready.resolve(`http://${a.hostname}:${a.port}`) },
+    mockYoutube,
+  );
+  base = await ready.promise;
+  configureYoutube({ YOUTUBE_BASE: base });
 });
 
-Deno.test("parseLikedItem: null when no videoId (continuation/telemetry entries)", () => {
-  assertEquals(parseLikedItem({}), null);
-  assertEquals(parseLikedItem({ continuationItemRenderer: {} }), null);
+Deno.test("youtube fetchItem: returns real title/channel for a resolved id", async () => {
+  const d = await youtubePlugin.fetchItem({ SAPISID: "x" }, "jNQXAC9IVRw") as Record<string, unknown>;
+  assertEquals(d.id, "jNQXAC9IVRw");
+  assertEquals(d.title, "Me at the zoo");
+  assertEquals(d.channel, "jawed");
+  assertEquals(d.channelId, "UC4QobU6STFB0P71PMvOGN5A");
+  assertEquals(d.lengthSeconds, "19");
+  assertEquals(d.viewCount, "404886875");
+  assertEquals(d.url, "https://www.youtube.com/watch?v=jNQXAC9IVRw");
 });
 
-Deno.test("parseLikedItem: falls back to accessibility label when title.runs is absent", () => {
-  const pvr = {
-    videoId: "abc123",
-    title: { accessibility: { accessibilityData: { label: "Some Title - 4:20" } } },
-    shortBylineText: { runs: [{ text: "Chan" }] },
-    lengthText: { simpleText: "4:20" },
-  };
-  assertEquals(parseLikedItem(pvr)!.title, "Some Title - 4:20");
-  assertEquals(parseLikedItem(pvr)!.meta, { channel: "Chan", length: "4:20" });
+Deno.test("youtube fetchItem: braces/escapes inside string values do not break the scan", async () => {
+  const d = await youtubePlugin.fetchItem({}, "BRACES1") as Record<string, unknown>;
+  assertEquals(d.title, 'He said "ok}" then {left} \\o/ }');
+  assertEquals(d.channel, 'chan}"nel');
 });
 
-// The first-page shape: ytInitialData.contents.twoColumnBrowseResultsRenderer.tabs[0]
-// .tabRenderer.content.playlistVideoListRenderer.contents, with a trailing
-// continuationItemRenderer holding the next-page token.
-Deno.test("parseLikedPage: items + continuation token from the first-page shape", () => {
-  const data = {
-    contents: {
-      twoColumnBrowseResultsRenderer: {
-        tabs: [{
-          tabRenderer: {
-            content: {
-              playlistVideoListRenderer: {
-                contents: [
-                  { playlistVideoRenderer: { videoId: "v1", title: { runs: [{ text: "A" }] }, shortBylineText: { runs: [{ text: "C1" }] }, lengthText: { simpleText: "1:00" } } },
-                  { playlistVideoRenderer: { videoId: "v2", title: { runs: [{ text: "B" }] }, shortBylineText: { runs: [{ text: "C2" }] }, lengthText: { simpleText: "2:00" } } },
-                  { continuationItemRenderer: { continuationEndpoint: { continuationCommand: { token: "NEXT_PAGE_TOKEN" } } } },
-                ],
-              },
-            },
-          },
-        }],
-      },
+Deno.test("youtube fetchItem: unresolvable id THROWS (never a shaped-but-empty object)", async () => {
+  await assertRejects(
+    () => youtubePlugin.fetchItem({}, "ZZZZZZZZZZZ"),
+    Error,
+    "unavailable",
+  );
+});
+
+Deno.test("youtube fetchItem: page without the player response throws", async () => {
+  await assertRejects(
+    () => youtubePlugin.fetchItem({}, "NOMARKER"),
+    Error,
+    "ytInitialPlayerResponse not found",
+  );
+});
+
+Deno.test("youtube fetchItem: extractPlayerResponse unit — nested + escaped", () => {
+  const unit = {
+    playabilityStatus: { status: "OK" },
+    videoDetails: {
+      title: 'a"b}c',
+      thumbnail: { thumbnails: [{ url: "https://x/?a={b}" }] },
     },
   };
-  const { items, cont } = parseLikedPage(data);
-  assertEquals(items.length, 2);
-  assertEquals(items[0], { id: "v1", title: "A", meta: { channel: "C1", length: "1:00" } });
-  assertEquals(items[1].id, "v2");
-  assertEquals(cont, "NEXT_PAGE_TOKEN");
+  const pr = extractPlayerResponse(
+    `<script>var ytInitialPlayerResponse = ${JSON.stringify(unit)};</script>`,
+  );
+  assert(pr);
+  assertEquals(pr.videoDetails.title, 'a"b}c');
+  assertEquals(pr.videoDetails.thumbnail.thumbnails[0].url, "https://x/?a={b}");
+  assertEquals(extractPlayerResponse(junkPage), null);
 });
 
-// Continuation responses may put the token under either continuationEndpoint or
-// continuationCommand directly across builds — collectLiked checks both.
-Deno.test("parseLikedContinuation: appendContinuationItemsAction items + token", () => {
-  const body = {
-    onResponseReceivedActions: [{
-      appendContinuationItemsAction: {
-        continuationItems: [
-          { playlistVideoRenderer: { videoId: "v3", title: { runs: [{ text: "C" }] }, shortBylineText: { runs: [{ text: "C3" }] }, lengthText: { simpleText: "3:00" } } },
-          { continuationItemRenderer: { continuationCommand: { token: "PAGE3_TOKEN" } } },
-        ],
-      },
-    }],
-  };
-  const { items, cont } = parseLikedContinuation(body);
-  assertEquals(items.length, 1);
-  assertEquals(items[0].id, "v3");
-  assertEquals(cont, "PAGE3_TOKEN");
-});
-
-Deno.test("parseLikedContinuation: no actions -> empty, no token", () => {
-  assertEquals(parseLikedContinuation({}), { items: [] });
-  assertEquals(parseLikedContinuation({ onResponseReceivedActions: [] }), { items: [] });
-});
-
-Deno.test("parseLikedPage: empty/missing contents -> empty, no token (never throws)", () => {
-  assertEquals(parseLikedPage({}), { items: [], cont: undefined });
-  assertEquals(parseLikedPage({ contents: { twoColumnBrowseResultsRenderer: { tabs: [] } } }), { items: [], cont: undefined });
+Deno.test("youtube fetchItem: stop mock server", async () => {
+  await server!.shutdown();
+  configureYoutube({ YOUTUBE_BASE: "" }); // restore live base for any later test
 });
