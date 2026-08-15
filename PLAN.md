@@ -1,34 +1,39 @@
-# PLAN — oauth3-server #120 (base staging)
+# PLAN — oauth3-server #15 (base staging)
 
-Issue: "Audit log is user-hostile: collapse repeated entries + retention policy"
+Issue: "[bug] top-level Deno.env crashes the isolated container (--deny-env)"
 
 ## Acceptance (from issue body — verbatim, the gate checks this)
-1. A run of identical consecutive audit events renders as ONE row carrying a count and a
-   time range (example: `cookies.sync google-calendar ×14 · last 2m`).
-2. Expanding that row still reaches the individual events — collapsing is a VIEW concern,
-   it must not destroy the trail.
-3. A bounded retention rule prunes the audit store (age- or count-based, state which + why).
-4. Demonstrate on real staging data: record audit store size before, run prune, record after.
-5. Evidence Tier 2: screenshot of collapsed run next to expanded form + before/after size.
+1. Adding a module-top-level `Deno.env.get(...)` anywhere under `server/` makes `deno task test`
+   fail with a message naming the offending file — shown by adding one temporarily: paste the
+   failing run and the clean run after removing it.
+2. The check walks the whole `server/` import graph (it catches a top-level read in
+   `server/plugins/otter.ts`, the file that caused the 2026-06-25 outage) and does NOT flag
+   `Deno.env` inside function bodies or `ctx.env` use.
+
+Evidence tier: **0** — lint/test only, zero runtime behavior change.
 
 ## Checklist
-- [x] retention policy in `server/audit.ts` — AGE (90d) + COUNT (1000) bounds, documented,
-      applied on every write (self-bounding) and at boot (self-heals an over-policy store).
-- [x] `applyRetention()` + `pruneAudit()` (reports before/after entries+bytes + boot prune).
-- [x] owner-only `POST /api/audit/prune` in `server/handler.ts` + route-table comment.
-- [x] collapse consecutive identical runs in dashboard `renderActs` (count + time range).
-- [x] expand row → reveal individual events (trail intact, data never destroyed).
-- [x] `server/audit_test.ts` — retention prunes aged + over-count, keeps newest, reports sizes.
-- [ ] `deno check server/main.ts` clean.
-- [ ] `deno test` green.
-- [ ] deploy to webhost-staging (`POST $TEE_DAEMON_URL/_api/projects`).
-- [ ] Tier-2 walk signed in as u-swarm: screenshot collapsed run + expanded form.
-- [ ] owner prune demo: real before/after store size on staging.
-- [ ] PR body per template; swap `ready`→`in-review` on PR open.
+- [x] `server/top_level_env_test.ts` — AST guard (npm:typescript 5.x): walks the STATIC import
+      graph of `server/handler.ts` (the graph the tee-daemon boots under --deny-env; dynamic
+      `await import()` is deferred past boot so it is not walked — same semantics as the #49
+      probe `_deny_env_probe.ts`).
+- [x] Flags `Deno.env.<member>(...)` / `Deno.env["K"](...)` that run at MODULE EVALUATION
+      (not inside any function-like body, not inside per-instance class field initializers).
+- [x] Does NOT flag `Deno.env` inside function bodies, `ctx.env` use, or `main.ts` (local
+      --allow-env entry, never booted by the container) — locked by synthetic-source unit tests.
+- [x] Failure message names the offending `file:line`.
+- [x] `deno check server/main.ts` clean.
+- [x] `deno task test` green on clean tree (log to ~/paseo-batch/out/oa-15/test.log).
+- [x] Acceptance flow: temporarily add `const X = Deno.env.get("FOO");` at top of
+      `server/plugins/otter.ts` → failing run naming that file; revert → green again.
+      Both runs pasted in the PR body.
+- [x] PR body per template (Tier 0); swap `ready`→`in-review` on PR open; label PR
+      `ready-to-merge` only after evidence committed.
 
-## Policy rationale (for the PR)
-- AGE 90d: incident-review/forensics window for a personal server; older cookie-sync churn
-  has no investigative value — this is what stops "implicitly retained forever".
-- COUNT 1000: the bound that actually stops a runaway high-churn source (the cookies.sync
-  rate-limit issue) regardless of age; keeps the most-recent 1000.
-- Enforced on every write (no cron) + at boot (self-heals). Tunable in one place.
+## Design notes
+- Why graph-from-`handler.ts` and not "every file under server/": test files run under
+  `--allow-env` (legit top-level env reads) and `main.ts` is the local `--allow-env` entry —
+  scanning them would false-positive a clean tree. The container boots exactly handler.ts's
+  static graph, so that is the graph that must stay env-free at module eval.
+- Pre-existing related guard `server/boot_deny_env_test.ts` (#49) covers the *rettiwt* static
+  import; #15 generalizes to ANY top-level `Deno.env` read and must fail with the file named.
