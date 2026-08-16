@@ -10,6 +10,7 @@
 //   DELETE /api/tokens/:token                 owner — revoke a token
 //   POST   /api/introspect                    bearer token — verify a scoped token
 //   GET    /api/audit                         owner — audit log
+//   GET    /api/jars                          owner — vault directory of current (subject, plugin) jars (#170)
 //   POST   /api/export {destinationPublicKey,subject?} owner/did:key — encrypted migration bundle
 //   POST   /api/audit/prune                    owner — apply retention policy, report before/after sizes (#120)
 //   GET    /api/promote                       signed-in user — proposed scope ingredients from observed reads
@@ -35,7 +36,7 @@
 
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
 import { configureEgress, egressFetch, egressProxy } from "./egress.ts";
-import { AmbiguousAccountError, deleteJar, deleteMigrating, entriesForExport, getJar, initVault, installEntries, jarsFor, markMigrating, setJar, strandedJars } from "./vault.ts";
+import { allJarStatuses, AmbiguousAccountError, deleteJar, deleteMigrating, entriesForExport, getJar, initVault, installEntries, jarsFor, markMigrating, setJar, strandedJars } from "./vault.ts";
 import { importTokens, initTokens, listTokens, mint, revoke, revokeSubject, tokensForSubject, type Token, verify, verifyCap } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit, pruneAudit } from "./audit.ts";
@@ -758,6 +759,18 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   if (req.method === "POST" && path === "/api/audit/prune") {
     if (!isOwner(req)) return json({ error: "owner only" }, 401);
     return json(await pruneAudit());
+  }
+
+  // #170 — GET /api/jars is the vault's directory of CURRENT jar ownership. Owner-only exactly
+  // like /api/audit: 401 without the owner secret. Returns every (subject, plugin) pair in the
+  // vault with jarStatus()'s fields (updatedAt, count) — never a cookie name or value; this is
+  // a directory, not a read. Consumers must stop reverse-engineering ownership from /api/audit:
+  // that ring buffer is bounded (#120 / PR #147) and evicts old `cookies.sync` entries while the
+  // jar is still fine (the self-inflicted "no z.ai jar synced" board regression). Same source of
+  // truth as allJars() — the scheduler and this endpoint must never disagree.
+  if (req.method === "GET" && path === "/api/jars") {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    return json({ jars: allJarStatuses() });
   }
 
   // #132 — make a stranded jar legible. `?subject=<current wallet subject>` classifies every

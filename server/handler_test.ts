@@ -5,7 +5,7 @@ import handler from "./handler.ts";
 import { initTokens, mint } from "./tokens.ts";
 import { assertEquals, assertExists } from "jsr:@std/assert@~1.0.0";
 import { getPlugin } from "./plugins/registry.ts";
-import { setJar } from "./vault.ts";
+import { allJars, deleteJar, setJar } from "./vault.ts";
 
 const TEST_ENV = {
   OAUTH3_OWNER_SECRET: "test-owner-secret",
@@ -267,6 +267,57 @@ Deno.test("handler returns signedIn:false for /api/me without auth", async () =>
 // The list is exposed under `items` (preferred — matches the endpoint name + listItems)
 // AND under `data` (back-compat alias still consumed by oauth3-sdk, cli.ts, app-page.ts
 // and otterscope). The single-item path stays {plugin, data:<item>}.
+Deno.test("handler: GET /api/jars 401s without the owner secret (#170)", async () => {
+  const { status, json } = await callHandler("GET", "/api/jars");
+  assertEquals(status, 401);
+  // @ts-ignore
+  assertExists(json.error);
+});
+
+// #170 — /api/jars is a directory of the VAULT (current state), not the audit ring buffer.
+Deno.test("handler: GET /api/jars is the vault directory — same pairs as allJars(), reflects DELETE, independent of /api/audit (#170)", async () => {
+  // Two jars written straight to the vault: no POST /api/cookies, so no cookies.sync ever
+  // enters the audit log for this subject — the "synced so long ago it rolled out of the
+  // ring buffer" case in its sharpest form.
+  await setJar("u-dir-subject", "otter", "default", { session: "x", other: "y" });
+  await setJar("owner", "youtube", "default", { session: "z" });
+
+  const res = await ownerReq("GET", "/api/jars");
+  assertEquals(res.status, 200);
+  const jars = (res.json as { jars: { subject: string; plugin: string; account: string; updatedAt: number; count: number }[] }).jars;
+
+  // jarStatus()'s fields are present per row …
+  const row = jars.find((j) => j.subject === "u-dir-subject" && j.plugin === "otter");
+  assertExists(row);
+  assertEquals(row.account, "default");
+  assertEquals(row.count, 2); // a count of cookies — …
+  assertEquals(typeof row.updatedAt, "number");
+  // … never a cookie NAME or VALUE: this is a directory, not a read.
+  assertEquals(JSON.stringify(jars).includes("session"), false);
+  assertEquals(JSON.stringify(jars).includes("\"x\""), false);
+
+  // AC: an owner reading /api/jars gets the same (subject, plugin) pairs allJars() hands the
+  // scheduler — asserted, not eyeballed.
+  const schedulerPairs = allJars().map((j) => `${j.subject}\0${j.plugin}`).sort();
+  const directoryPairs = jars.map((j) => `${j.subject}\0${j.plugin}`).sort();
+  assertEquals(directoryPairs, schedulerPairs);
+
+  // Reflects the vault, not a log: DELETE a jar → its pair disappears from the response …
+  assertEquals(await deleteJar("owner", "youtube", "default"), true);
+  const after = await ownerReq("GET", "/api/jars");
+  const afterJars = (after.json as { jars: { subject: string; plugin: string }[] }).jars;
+  assertEquals(afterJars.some((j) => j.subject === "owner" && j.plugin === "youtube"), false);
+  // … while the pair whose cookies.sync never hit the audit log (rolled out / never entered)
+  // is still listed.
+  assertEquals(afterJars.some((j) => j.subject === "u-dir-subject" && j.plugin === "otter"), true);
+  const auditRes = await ownerReq("GET", "/api/audit");
+  const auditEntries = (auditRes.json as { audit: { action: string; detail?: Record<string, unknown> }[] }).audit;
+  assertEquals(
+    auditEntries.some((e) => e.action === "cookies.sync" && e.detail?.subject === "u-dir-subject" && e.detail?.plugin === "otter"),
+    false,
+  );
+});
+
 Deno.test("handler: GET /api/:plugin/items returns list under `items` AND `data` (alias) — #95", async () => {
   const plugin = getPlugin("otter")!;
   const origLoggedIn = plugin.loggedIn;
