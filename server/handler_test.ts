@@ -212,6 +212,41 @@ Deno.test("handler: tighten revokes broad token and re-mints enforced ingredient
   assertEquals(fresh.caps, ["reddit:karma"]);
 });
 
+Deno.test("handler: POST /api/introspect distinguishes only active from inactive", async () => {
+  const app = `introspect-${crypto.randomUUID()}`;
+  const minted = await ownerReq("POST", "/api/tokens", {
+    plugin: "otter",
+    subject: "u-introspect-subject",
+    app,
+    caps: ["jar"],
+  });
+  assertEquals(minted.status, 200);
+  // @ts-ignore
+  const token = minted.json.token as string;
+
+  const active = await callHandler("POST", "/api/introspect", undefined, {
+    Authorization: `Bearer ${token}`,
+  });
+  assertEquals(active.status, 200);
+  // @ts-ignore
+  assertEquals(active.json, { active: true, plugin: "otter", subject: "u-introspect-subject", app, caps: ["jar"] });
+
+  const garbage = await callHandler("POST", "/api/introspect", undefined, {
+    Authorization: "Bearer tok-otter-garbage",
+  });
+  assertEquals(garbage.status, 200);
+  // @ts-ignore
+  assertEquals(garbage.json, { active: false });
+
+  await ownerReq("DELETE", `/api/tokens/${encodeURIComponent(token)}`);
+  const revoked = await callHandler("POST", "/api/introspect", undefined, {
+    Authorization: `Bearer ${token}`,
+  });
+  assertEquals(revoked.status, 200);
+  // @ts-ignore
+  assertEquals(revoked.json, { active: false });
+});
+
 console.log("All handler tests passed.");
 
 // --- from #34 (staging-oa-33): generic route/auth smoke tests ---
