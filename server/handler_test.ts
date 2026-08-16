@@ -321,3 +321,27 @@ Deno.test("handler: POST /api/audit/prune is owner-only", async () => {
   // @ts-ignore
   assertEquals((ok.json?.policy?.maxEntries ?? 0) > 0, true);
 });
+
+// #55 (RFC 0008): the demo app goes through the SDK connect() port — it must not
+// branch on the injected provider, and it must surface the web-handshake approve URL.
+Deno.test("app page: SDK connect contract, no provider branch (#55)", async () => {
+  const req = new Request("http://localhost:8000/app?plugin=otter", { method: "GET" });
+  const res = await handler(req, TEST_CTX);
+  const body = await res.text();
+  assertEquals(res.status, 200);
+  assertEquals(
+    body.includes("window.oauth3"),
+    false,
+    "/app must not reference the injected provider directly (RFC 0008)",
+  );
+  assertEquals(
+    body.includes("onApproveUrl"),
+    true,
+    "/app must render the approve link via the SDK web handshake",
+  );
+  assertEquals(
+    body.includes("globalThis.oauth3"),
+    true,
+    "provider preference lives inside the SDK connect() port, not the app",
+  );
+});
