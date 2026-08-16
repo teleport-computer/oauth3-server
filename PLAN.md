@@ -5,12 +5,15 @@ evidence (signed-in staging walk with committed screenshots).
 
 ## Acceptance checkboxes
 
-- [ ] Existing loop probes name and revoke ephemeral tokens (already shipped; verify honestly)
+- [x] Existing loop probes name and revoke ephemeral tokens (already shipped; verified honestly
+      — 3 consecutive sweeps minted named loop-probe tokens only, 0 unnamed mints since, live
+      unnamed 127 → 4; see `.evidence/issue-119/flow.md`)
 - [x] Dashboard groups live tokens by app rather than a flat list
 - [x] Dashboard offers bulk revoke for each app group
 - [x] `deno check server/main.ts` green
-- [x] `deno test --allow-net --allow-read --allow-write --allow-env` green
-- [ ] Tier 2 signed-in staging walk with screenshots and acceptance assertions committed
+- [x] `deno test --allow-net --allow-read --allow-write --allow-env` green (182 passed post-rebase)
+- [x] Tier 2 signed-in staging walk with screenshots and acceptance assertions committed
+      (`.evidence/issue-119/01..04-*.png` + `flow.md`)
 
 ## Implementation surface
 
@@ -25,9 +28,7 @@ evidence (signed-in staging walk with committed screenshots).
 - If the probe loop is operator-run, state its already-shipped evidence and remaining operator
   verification honestly in the issue/PR; never fabricate counts.
 
-## Blocked verification
-
-The staging daemon accepted the upload but `GET /oauth3/_api/version` and `/oauth3/` return HTTP
-500. A restore deploy from `origin/staging` also returns HTTP 500, so the signed-in browser walk
-cannot be run against a healthy deployed build. Do not label the PR `ready-to-merge` until staging
-is repaired and the Tier 2 screenshots plus probe sweep counts are captured.
+## Verification blocker — RESOLVED 2026-08-16
+Staging was repaired by the operator (health 200). The rebased branch `c4499de` was deployed via
+`deploy-staging-oauth3.sh`, the signed-in `u-swarm` Tier 2 walk was run, and the screenshots plus
+sweep counts are committed under `.evidence/issue-119/`. The retention half stays blocked on #122.
