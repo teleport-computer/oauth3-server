@@ -1,30 +1,34 @@
-# PLAN — issue #16: add deploy.sh codifying the full oauth3 manifest
+# PLAN — #55 Enforce SDK connect() over the extension object (RFC 0008)
 
-Branch `staging-oa-16` (base `origin/staging` @ 081dde8). Evidence tier **1** (deploy behavior over
-HTTP against deployed staging), per the issue.
+Derived from issue #55 `## Acceptance`. Change type: **user-visible page** → **Tier 2**
+(signed-in walk on deployed staging, extension absent).
 
-## Acceptance → checkboxes
-- [x] `bash deploy.sh <node-url>` with the staging daemon token redeploys oauth3; afterwards
-      `GET .../oauth3/api/health` → 200 with the plugin list.
-- [x] Post-deploy `GET {node}/_api/projects` still carries every live field: `isolation: container`,
-      `listen.port 8080`, the full `env_passthrough` list — diffed against the pre-deploy read; only
-      tarball/commit fields (+ the verified-recipe normalizations the issue mandates) differ.
-- [x] Node is a required argument; no hardcoded prod node; refuses to run without one.
+## Audit verdict at spawn (2026-08-15) — PART was already done
+- ✅ `otterscope/server.ts` — already migrated by **webhost-apps PR #143** (merged 2026-08-15,
+  live on staging: 0 `window.oauth3` occurrences; SDK `connect()` port + approve link). NOT redone.
+- ❌ `server/app-page.ts` — still branched on the provider (`if (!window.oauth3)` dead end) on staging.
+- ❌ contract doc — absent from `docs/` and the SDK README.
+- Audit extras (NOT in acceptance → reported as follow-ups on the issue, not fixed here):
+  `timeline-peek/index.html` still branches; `login-with-everything` is extension-by-design (PRD).
 
-## Steps
-- [x] `deploy.sh` at repo root: required `<node-url>` arg (usage error otherwise), optional `[git-ref]`
-      (default HEAD); token from `TEE_DAEMON_TOKEN` or `~/.tee-daemon-staging.env`.
-- [x] Read live manifest first (`GET {node}/_api/projects`), refuse to deploy if the live env lacks
-      SEAL_KEY/OWNER_SECRET (2026-08-10 lesson) or POLL_INTERVAL_MIN/PUBLIC_URL; carry every env key
-      forward byte-for-byte (2026-08-12 lesson — never name secret values).
-- [x] Apply the verified manifest: `isolation: container`, `oci_runtime: runc`,
-      `listen: {port: 8080, protocol: http}`, `entry: handler.ts` (flat tarball), `ref`, `env.GIT_SHA`;
-      `env_passthrough` preserved verbatim.
-- [x] Build gate: `deno check server/main.ts` clean; flat tarball with root `handler.ts`
-      (SIGPIPE-safe listing guard); `DEPLOY_STAMP`.
-- [x] POST manifest+tarball; health-gate `/oauth3/api/health` until 200; print `/_api/version`.
-- [x] Post-read + masked diff + assertions; exit non-zero on any violation.
-- [x] `deno check` + `deno task test` green (log to ~/paseo-batch/out/oa-16/test.log).
-- [x] Live Tier-1 run against staging; transcript + masked pre/post manifests to `.evidence/issue-16/`.
-- [x] Docs pointer (README deploy section + operator.md §2).
-- [x] PR → staging; swap issue labels `ready` → `in-review`.
+## Acceptance checkboxes (issue #55)
+- [ ] `/oauth3/app` on staging, no extension: connect→approve→items renders real items (web handshake carries it)
+- [ ] `server/app-page.ts` no longer branches on the provider; calls SDK `connect()` with `onApproveUrl`
+- [ ] Contract written down once: `docs/app-contract.md`
+- [ ] (otterscope half of checkbox 2 — already done via webhost-apps #143; linked, not duplicated)
+
+## Implementation surface (branch `staging-oa-55`, base `origin/staging`)
+1. `server/app-page.ts` — verbatim SDK `connect()` port (`oauth3Connect`, same as otterscope #143),
+   `onApproveUrl` → approve-link UI (`#approve`), provider check removed, honest RFC-0008 409 hint,
+   extension-optional copy.
+2. `docs/app-contract.md` — the one-sentence contract + compliance how-to + UX rules.
+3. `server/handler_test.ts` — regression test: /app HTML has no `window.oauth3`, has `onApproveUrl`,
+   provider preference inside the port.
+
+## Verify (Step 3, Tier 2)
+- [ ] `deno check server/main.ts` green
+- [ ] `deno test` green
+- [ ] deploy via `~/paseo-batch/deploy-staging-oauth3.sh staging-oa-55`; `/_api/version` == commit
+- [ ] envoy walk, u-swarm, extension provider neutralized (single bridge tab — approve UI walked in
+      run 1; run 2 completes connect→approve→items in-page): shots to `.evidence/issue-55/`,
+      `flow.md` asserts acceptance; item titles redacted in committed shots (public repo, personal data).
