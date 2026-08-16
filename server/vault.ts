@@ -200,6 +200,37 @@ export async function markMigrating(subject: string): Promise<number> {
   return count;
 }
 
+export async function installEntries(subject: string, entries: ExportedVaultEntry[]): Promise<number> {
+  for (const entry of entries) {
+    if (!entry || typeof entry.plugin !== "string" || typeof entry.account !== "string" ||
+      !entry.jar || typeof entry.jar !== "object") throw new Error("malformed vault entry");
+    store[keyOf(subject, entry.plugin, entry.account)] = { jar: entry.jar, updatedAt: entry.updatedAt };
+  }
+  if (entries.length) await persist();
+  return entries.length;
+}
+
+export async function deleteEntries(subject: string): Promise<number> {
+  let count = 0;
+  for (const k of Object.keys(store)) {
+    if (parseKey(k).subject === subject) { delete store[k]; count++; }
+  }
+  if (count) await persist();
+  return count;
+}
+
+export async function deleteMigrating(subject: string): Promise<number> {
+  let count = 0;
+  for (const [k, entry] of Object.entries(store)) {
+    if (parseKey(k).subject === subject && entry.status === "migrating") {
+      delete store[k];
+      count++;
+    }
+  }
+  if (count) await persist();
+  return count;
+}
+
 // #132 — make a stranded jar legible. A jar is "stranded" when it exists under a subject
 // the current wallet no longer uses (e.g. a retired extension wallet's userKey derived a
 // different subject; every jar synced under it stops refreshing but is NOT "expired"). Today

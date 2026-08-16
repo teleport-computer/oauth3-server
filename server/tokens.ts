@@ -63,6 +63,25 @@ export async function revoke(token: string): Promise<boolean> {
   return true;
 }
 
+export async function importTokens(grants: Token[]): Promise<number> {
+  for (const grant of grants) {
+    if (!grant || typeof grant.token !== "string" || typeof grant.plugin !== "string" ||
+      typeof grant.subject !== "string") throw new Error("malformed grant row");
+    tokens[grant.token] = { ...grant };
+  }
+  if (grants.length) await persist();
+  return grants.length;
+}
+
+export async function revokeSubject(subject: string): Promise<number> {
+  let count = 0;
+  for (const token of Object.values(tokens)) {
+    if (token.subject === subject && !token.revokedAt) { token.revokedAt = Date.now(); count++; }
+  }
+  if (count) await persist();
+  return count;
+}
+
 export function listTokens(): Token[] {
   return Object.values(tokens).sort((a, b) => b.createdAt - a.createdAt);
 }
