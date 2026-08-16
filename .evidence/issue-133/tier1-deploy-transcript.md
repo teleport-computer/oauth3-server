@@ -90,6 +90,27 @@ lane's PR head (`e4869fc` = `staging-oa-55`; its `/api/health` omits `codex`, as
 branch without this PR). The deployed run above remains the pinned point-in-time evidence the
 gate accepted; staging integration of the merged commit is the auto-merger's step.
 
+## Rebase addendum (2026-08-16, third drift: staging @ d6ec3bd)
+
+Same verdict class, relabeled `rework` at 04:25:14Z with the comment suppressed (marker
+`3c54fb4e843e` dedupes): #168 merged into `staging` (`d6ec3bd`) nine seconds before the gate's
+hourly run, so GitHub still reported `mergeable=UNKNOWN` transiently. Rebased onto `d6ec3bd`,
+**zero conflicts** — #168 touches `server/app-page.ts`, `server/handler_test.ts`, docs and its
+own `.evidence/issue-55/`, all disjoint from this PR's paths. Commits replay as
+`78228df` (code, was `226ae2a`) + the evidence commit.
+
+```
+git diff 226ae2a 78228df --stat   # exactly #168's own file set
+ .evidence/issue-55/…  PLAN.md  docs/app-contract.md  scripts-walk-55.py
+ server/app-page.ts    server/handler_test.ts
+```
+
+No PR-owned path appears in the delta, so the transcript's responses are again produced by
+byte-identical code. Re-verification: `deno check server/main.ts` green;
+`deno test --allow-all server/` → **180 passed, 0 failed** (+1 vs the recorded 179: #168's own
+new handler test). No redeploy for the same reason as below (shared staging node serving another
+lane's PR head); the auto-merger remains the integration step.
+
 ## Could NOT verify
 
 Real upstream ChatGPT/Codex quota numbers end-to-end: that requires a real ChatGPT bearer synced
