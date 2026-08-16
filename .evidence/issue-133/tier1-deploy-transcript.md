@@ -117,3 +117,25 @@ Real upstream ChatGPT/Codex quota numbers end-to-end: that requires a real ChatG
 into the jar (no standing codex consent in the token ledger — jars: amazon, google, otter, reddit,
 x, youtube only). The no-bearer path is demonstrated honestly above (409 naming the cause); the
 upstream contract + parsing is pinned by the committed fixture and test.
+
+## Fourth rebase addendum (2026-08-16, staging @ 919a1c8, #169)
+
+Same verdict class again — `rework` relabeled at 05:25:13Z, comment suppressed (marker
+`3c54fb4e843e` dedupes; gate ran while `mergeable` was transiently UNKNOWN after #169 merged).
+Rebased onto `staging` @ `919a1c8`, **zero conflicts** — #169 adds the scoped-token introspection
+endpoint (`POST /api/introspect`) in `server/handler.ts` + `docs/http-api.md` +
+`server/handler_test.ts`; its handler insertions sit in regions disjoint from every codex-owned
+line. Commits replay as `ceffab8` (code, was `78228df`) + the evidence commits.
+
+```
+git diff 78228df ceffab8 --stat   # exactly #169's own file set, +56 lines
+ docs/http-api.md  server/handler.ts  server/handler_test.ts
+git diff 78228df ceffab8 -- server/handler.ts | grep -E '^[+-]' | grep -icE 'codex|tokenSource|quota'   # → 0
+```
+
+No PR-owned line appears in the delta (the codex import, `configureCodex(env)`, the `tokenSource`
+spread in `/api/plugins`, and the quota chokepoint are byte-identical), so this transcript's
+responses are produced by identical code bytes. Re-verification: `deno check server/main.ts` green;
+`deno test --allow-all server/` → **181 passed, 0 failed** (+1 vs the recorded 180: #169's own
+new introspection test). No redeploy, same reason as prior addenda: the shared staging node serves
+another lane's PR head; staging integration of the merged commit remains the auto-merger's step.
