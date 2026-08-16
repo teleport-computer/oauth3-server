@@ -8,6 +8,7 @@
 //   POST   /api/tokens    {plugin,subject}    owner — mint a scoped read token
 //   GET    /api/tokens                        owner — list tokens
 //   DELETE /api/tokens/:token                 owner — revoke a token
+//   POST   /api/introspect                    bearer token — verify a scoped token
 //   GET    /api/audit                         owner — audit log
 //   POST   /api/audit/prune                    owner — apply retention policy, report before/after sizes (#120)
 //   GET    /api/promote                       signed-in user — proposed scope ingredients from observed reads
@@ -618,6 +619,16 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = await mint(body.plugin, subj, body.app, Array.isArray(body?.caps) ? body.caps : undefined, account);
     await audit("token.mint", { plugin: t.plugin, subject: t.subject, app: t.app, caps: t.caps, account });
     return json({ token: t.token, plugin: t.plugin, subject: t.subject, caps: t.caps ?? null, account: account ?? null });
+  }
+  // RFC 7662-style verification for third-party resource servers. Unknown and revoked
+  // tokens deliberately share the same response so this endpoint cannot be used as a
+  // token-probing oracle. The token itself is accepted from the bearer header, not JSON,
+  // so callers cannot accidentally introspect a different credential than the one presented.
+  if (req.method === "POST" && path === "/api/introspect") {
+    const token = authBearer;
+    const t = token ? listTokens().find((candidate) => candidate.token === token && !candidate.revokedAt) : undefined;
+    if (!t) return json({ active: false });
+    return json({ active: true, plugin: t.plugin, subject: t.subject, app: t.app ?? null, caps: t.caps ?? [] });
   }
   if (req.method === "GET" && path === "/api/tokens") {
     const subj = subjectOf();
