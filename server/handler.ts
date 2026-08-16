@@ -23,7 +23,7 @@
 //   POST   /api/connect/:requestId/approve|deny  owner_secret — the user's decision
 //   GET    /approve/:requestId                HTML approval screen
 //   GET    /api/:plugin/account              scoped token OR owner — account-level data (identity + karma)
-//   GET    /api/:plugin/quota                scoped token OR owner — usage/quota numbers (e.g. z.ai Coding Plan)
+//   GET    /api/:plugin/quota                scoped token OR owner — provider usage/quota numbers (e.g. z.ai Coding Plan, ChatGPT Codex)
 //   GET    /api/:plugin/items[/:id]           scoped token OR owner — read
 //        list (/items)    → {plugin, items:[{id,title,date?,meta?}], data:items}  (prefer `items`; `data` is a back-compat alias)
 //        one   (/items/:id) → {plugin, data:<item>}
@@ -54,6 +54,7 @@ import { allCredentialIds, credentialsFor, initPasskeys, passkeyChallenge, verif
 import { consumeState, enabledProviders, githubAuthUrl, githubEnv, githubExchange, googleAuthUrl, googleCalendarAuthUrl, googleCalendarExchange, googleEnv, googleExchange, newState } from "./oidc.ts";
 import { configureOtter } from "./plugins/otter.ts";
 import { configureReddit } from "./plugins/reddit.ts";
+import { configureCodex } from "./plugins/codex.ts";
 import { amazonPlugin, configureAmazon } from "./plugins/amazon.ts";
 import { configureGoogleCalendar } from "./plugins/google-calendar.ts";
 import { configureZai } from "./plugins/zai.ts";
@@ -107,6 +108,7 @@ async function init(env: Record<string, string>, dataDir: string) {
   configureAmazon(env);
   configureGoogleCalendar(env);
   configureZai(env);
+  configureCodex(env);
   await initListings(dataDir);
   locator = await createLocatorStore(dataDir);
   await initEval(dataDir);
@@ -503,6 +505,8 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
         // keeps its exact current shape.
         ...(p.path ? { path: p.path } : {}),
         ...(p.available === false ? { available: false } : {}),
+        // #133: non-cookie credentials declare tokenSource so the extension can sync them.
+        ...(p.tokenSource ? { tokenSource: p.tokenSource } : {}),
         // #111: one identity may hold several accounts per plugin — surface them all.
         jars: subj ? jarsFor(subj, p.id) : [],
       })),
@@ -1196,11 +1200,12 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
 
   // --- usage/quota (scoped token or owner): provider-side usage numbers for the logged-in
   // account. For zai this is the GLM Coding Plan dashboard (5h/weekly quota %, tokens, per
-  // model) — the read behind the `zai:usage-read` scope ingredient. Same chokepoint as
-  // /items (readKind "quota"), so a usage-scoped token is confined to this and nothing else. ---
-  const quo = path.match(/^\/api\/([a-z0-9-]+)\/quota$/);
-  if (req.method === "GET" && quo) {
-    const plugin = getPlugin(quo[1]);
+  // model); for codex the ChatGPT 5-hour/weekly windows — the read behind the
+  // `*:usage-read` scope ingredients. Same chokepoint as /items (readKind "quota"), so a
+  // usage-scoped token is confined to this and nothing else. ---
+  const quota = path.match(/^\/api\/([a-z0-9-]+)\/quota$/);
+  if (req.method === "GET" && quota) {
+    const plugin = getPlugin(quota[1]);
     if (!plugin) return json({ error: "unknown plugin" }, 404);
     if (!plugin.quota) return json({ error: `${plugin.id} has no quota view` }, 404);
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");

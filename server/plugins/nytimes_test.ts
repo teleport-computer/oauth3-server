@@ -38,7 +38,12 @@ Deno.test("nytimes #12: every other plugin entry keeps its current shape", async
   const j = await r.json();
   const others = j.plugins.filter((p: { id: string }) => p.id !== "nytimes");
   for (const p of others) {
-    // The pre-#12 serialization keys, and nothing more.
-    assertEquals(Object.keys(p).sort(), ["account", "cookieDomains", "id", "jars", "label"]);
+    // The pre-#12 serialization keys, and nothing more — save the intentional additions
+    // since: #12's own path/available (nytimes itself, excluded above), and #133's
+    // tokenSource, declared ONLY by plugins whose credential is not a cookie (codex) so
+    // the extension can sync it. Any other key on any other plugin is still a regression.
+    const base = ["account", "cookieDomains", "id", "jars", "label"];
+    const extra = Object.keys(p).filter((k) => !base.includes(k));
+    assertEquals(extra, p.id === "codex" && "tokenSource" in p ? ["tokenSource"] : []);
   }
 });
