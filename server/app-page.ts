@@ -106,7 +106,9 @@ $("login").addEventListener("click", async () => {
   $("login").disabled = true;
   try {
     const token = await oauth3Connect({
-      node: NODE, plugin: PLUGIN, app: PLUGIN + "-demo",
+      // "demo-app" is the instance demo's entry in the listing gate (server/listing.ts) —
+      // an unlisted id is refused by POST /api/connect before any approval can happen.
+      node: NODE, plugin: PLUGIN, app: "demo-app",
       onApproveUrl: (url) => showApprove(url),
     });
     clearApprove();
