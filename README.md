@@ -142,6 +142,7 @@ Reference documentation lives in [`docs/`](docs/):
 - [`docs/auth.md`](docs/auth.md) — the auth model in one place: owner secret vs web session vs scoped token, and which endpoints accept which.
 - [`docs/plugins.md`](docs/plugins.md) — authoring a plugin: the `Plugin` interface, how scoped-fetch constrains it, the copy-fill-register pattern.
 - [`docs/operator.md`](docs/operator.md) — operator guide: local dev, tee-daemon deploy, the dev / source-bound / attested trust postures, evidence verification, and seeding a jar.
+- [`docs/tinycloud.md`](docs/tinycloud.md) — the storage story: how oauth3 apps write to your TinyCloud (the `tc` CLI flows, capability self-grants, otter-importer as the worked example), pinned to a live node probe.
 
 ## Status
 
