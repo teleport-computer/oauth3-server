@@ -9,10 +9,10 @@ Derived from issue #11 `## Acceptance`. Change type: **backend/API** →
       → implementation + tests shipped; LIVE read blocked on a seeded jar
         (see .evidence/issue-11/). Stub baseline: HTTP 200 `{id,url}` pair.
 - [x] An id YouTube does not resolve makes `fetchItem` throw (handler → 502), not a
-      shaped-but-empty object — verified live on staging (6b57609):
+      shaped-but-empty object — verified live on staging, re-verified at rebased tip 5ab1a5b:
       `ZZZZZZZZZZZ` → 502 `{"error":"youtube item ZZZZZZZZZZ: This video is unavailable"}`
-- [x] `deno check server/main.ts` green
-- [x] `deno test` green (169 passed incl. new `server/plugins/youtube_test.ts`)
+- [x] `deno check server/main.ts` green (rebased tree)
+- [x] `deno test` green — 188 passed post-rebase (169 at PR time + 19 from staging's new commits)
 
 ## Implementation surface (against origin/staging)
 1. `server/plugins/youtube.ts`
@@ -34,8 +34,9 @@ Derived from issue #11 `## Acceptance`. Change type: **backend/API** →
    error; non-JSON → throws.
 
 ## Verification flow (issue #11, step order)
-- Precondition: youtube jar present for the rig subject (checked on staging: present,
-  31 cookies — but rotted: history list reads `logged_in=0` → 502).
+- Precondition: youtube jar present for the rig subject — present, but NO logged-in jar exists:
+  the staged one rotted (`logged_in=0` since ~07-19) and the 2026-08-14 swarm-store snapshot,
+  when seeded and replayed, is logged out too (see .evidence/issue-11/).
 - Because the LIST cannot supply an id while the jar is rotted (operator-repairable
   only), the id used for Tier 1 is a real, stable public id (`jNQXAC9IVRw`), ground-truth
   verified. The "id taken from GET /api/youtube/items" step is commented back to the

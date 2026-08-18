@@ -31,3 +31,8 @@ SAPISID does not authenticate, hence the honest 502 in tier1-transcript.txt.
 Seed a logged-in `.youtube.com` jar for the swarm subject (re-sync via the extension), then
 re-run: `GET /oauth3/api/youtube/items` → first id → `GET /oauth3/api/youtube/items/<id>`
 should return title+channel (criterion 1 live check; criterion 2 is already verified live).
+
+2026-08-18 update (rebase): the snapshot at `~/.paseo-secrets/jars/youtube.com.json` (2026-08-14,
+317 cookies / 31 distinct, full SAPISID/`__Secure-3PSID`/LOGIN_INFO set) was seeded to staging
+and is ALSO logged out — replayed from the worker box (not the TEE), the history page answers
+`logged_in = 0`. A fresh re-sync from a real logged-in browser session is required.
