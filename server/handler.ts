@@ -29,12 +29,14 @@
 //   GET    /api/:plugin/items[/:id]           scoped token OR owner — read
 //        list (/items)    → {plugin, items:[{id,title,date?,meta?}], data:items}  (prefer `items`; `data` is a back-compat alias)
 //        one   (/items/:id) → {plugin, data:<item>}
-//   GET    /api/youtube/liked                    scoped token OR owner — the owner's liked videos (playlist LL), readKind "liked" (#144)
+//   GET    /api/:plugin/:kind                    scoped token OR owner — any REGISTERED named read (server/reads.ts),
+//                                                 e.g. /api/youtube/liked (readKind "liked", #144). Same gate as every read above.
 //   GET    /api/:plugin/live[?after=N]        scoped token OR owner — live item segments + frame urls
 //   GET    /api/:plugin/frame?u=<b64url>      scoped token OR owner — proxy one shared-screen image (binary)
 //   GET    /api/:plugin/screenshot            scoped token OR owner — logged-in render via Browser SPI
 
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
+import { getRead } from "./reads.ts";
 import { configureEgress, egressFetch, egressProxy } from "./egress.ts";
 import { allJarStatuses, AmbiguousAccountError, deleteJar, deleteMigrating, entriesForExport, getJar, initVault, installEntries, jarsFor, markMigrating, setJar, strandedJars } from "./vault.ts";
 import { importTokens, initTokens, listTokens, mint, revoke, revokeSubject, tokensForSubject, type Token, verify, verifyCap } from "./tokens.ts";
@@ -1126,32 +1128,39 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return json({ subject: subj, count: Object.keys(jar).length, egress: { via: viaEgress, proxy: egressProxy() || null }, names: Object.keys(jar), critical, fetch: fetchInfo });
   }
 
-  // --- #144: the owner's liked videos (playlist LL) as structured items. A DISTINCT read
-  // chokepoint (readKind "liked") from watch history (/feed, readKind "feed"), gated by the
-  // same scope chokepoint: a `youtube:liked` token may read here and NOT /feed, and a
-  // `youtube:history` token may read /feed and NOT here — the confinement is the point. The
-  // plugin fetches LL via the logged-in InnerTube browse API and pages to exhaustion; a
-  // logged-out/rotted jar throws (surfaced as 502), never an empty list. No-jar is a 409 from
-  // readJar (the same clear error every other read returns).
-  if (req.method === "GET" && path === "/api/youtube/liked") {
-    const plugin = getPlugin("youtube");
-    if (!plugin || !plugin.liked) return json({ error: "unknown plugin" }, 404);
-    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
-    const t = verify(bearer, plugin.id);
-    if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
-    const denied = await gateRead(t, plugin.id, "liked", bearer); if (denied) return denied;
-    const subj = jarSubject(t);
-    if (subj instanceof Response) return subj;
-    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
-    const jar = rj.jar;
-    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
-    try {
-      const items = await plugin.liked(jar);
-      if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
-      await audit("liked", { plugin: plugin.id, count: items.length, by: t ? (t.app || t.subject || "token") : "owner" });
-      return json({ plugin: plugin.id, items });
-    } catch (e) {
-      return json({ error: (e as Error).message }, 502);
+  // --- named reads (server/reads.ts) — ONE route for every read that is REGISTERED rather than
+  // bolted onto the Plugin interface. #144's /api/youtube/liked was the last read to get its own
+  // hand-written block here; it is now a registration in youtube.ts served from this route, so the
+  // next read variant costs a file instead of an interface edit + a route + an attested deploy.
+  // Confinement is unchanged — the same gateRead chokepoint — so a `youtube:liked` token reads
+  // here and NOT /feed, and a `youtube:history` token the reverse. Placed AFTER every bespoke
+  // route, and registerRead() refuses the reserved kinds, so this can neither shadow one nor be
+  // shadowed by one.
+  const namedRead = path.match(/^\/api\/([a-z0-9-]+)\/([a-z0-9-]+)$/);
+  if (req.method === "GET" && namedRead) {
+    const nr = getRead(namedRead[1], namedRead[2]);
+    if (nr) {
+      const plugin = getPlugin(nr.plugin);
+      if (!plugin) return json({ error: "unknown plugin" }, 404);
+      const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+      const t = verify(bearer, plugin.id);
+      if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+      const denied = await gateRead(t, plugin.id, nr.kind, bearer); if (denied) return denied;
+      const subj = jarSubject(t);
+      if (subj instanceof Response) return subj;
+      const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+      const jar = rj.jar;
+      if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+      try {
+        const data = await nr.run(jar);
+        if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
+        const count = Array.isArray(data) ? data.length : undefined;
+        await audit(nr.kind, { plugin: plugin.id, count, by: t ? (t.app || t.subject || "token") : "owner" });
+        // Response shape preserved from the route this replaces: a list read answers { plugin, items }.
+        return json(Array.isArray(data) ? { plugin: plugin.id, items: data } : { plugin: plugin.id, data });
+      } catch (e) {
+        return json({ error: (e as Error).message }, 502);
+      }
     }
   }
 
