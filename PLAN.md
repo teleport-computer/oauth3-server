@@ -1,34 +1,40 @@
-# PLAN — #119 Token dashboard hygiene
+# PLAN — issue #19: document the otterscope demo + the window.oauth3.connect provider flow
 
-Derived from issue #119 `## Acceptance`. Change type: **user-visible dashboard** → **Tier 2**
-evidence (signed-in staging walk with committed screenshots).
+Acceptance checkboxes (from the issue):
 
-## Acceptance checkboxes
+- [x] `README.md` links the live `otterscope` demo and the SDK documentation.
+- [x] The linked documentation shows `window.oauth3.connect({node, plugin})` returning a scoped
+      token and the app consuming `/oauth3/api/:plugin/items` without receiving a cookie.
+- [x] A reader can follow the documented provider flow from connect request through token-backed
+      read, with the request/response shapes matching the implemented API docs.
 
-- [x] Existing loop probes name and revoke ephemeral tokens (already shipped; verified honestly
-      — 3 consecutive sweeps minted named loop-probe tokens only, 0 unnamed mints since, live
-      unnamed 127 → 4; see `.evidence/issue-119/flow.md`)
-- [x] Dashboard groups live tokens by app rather than a flat list
-- [x] Dashboard offers bulk revoke for each app group
-- [x] `deno check server/main.ts` green
-- [x] `deno test --allow-net --allow-read --allow-write --allow-env` green (182 passed post-rebase)
-- [x] Tier 2 signed-in staging walk with screenshots and acceptance assertions committed
-      (`.evidence/issue-119/01..04-*.png` + `flow.md`)
+## Steps
 
-## Implementation surface
+- [x] Verify the facts before writing (done — code-verified, see notes below).
+- [x] Write `docs/provider-flow.md`: live otterscope demo link + the provider flow
+      (connect → scoped token → token-backed read), request/response shapes matching
+      `docs/http-api.md` and `server/handler.ts`/`server/connect.ts`.
+- [x] Link it from `README.md` (live demo URL + SDK docs link + the new page).
+- [x] Link it from the SDK docs (`oauth3-sdk` README) — the issue body's second link target.
+- [x] Link/example checks: live demo URL 200; linked files exist; README contains both links.
+- [x] `deno check server/main.ts` + `deno test` green (Tier 0: no behavior change).
+- [x] PR to `staging`, swap issue label ready → in-review, comment.
 
-1. `server/dashboard-page.ts` — group live tokens by app and render an app-level bulk revoke action.
-2. `server/dashboard-page_test.ts` — pin the grouping and bulk-revoke controls in the rendered page.
+## Verified facts (2026-08-20, staging HEAD d62cc6c)
 
-## Evidence (Tier 2)
-
-- Deploy to staging; sign in as `u-swarm`; walk the dashboard with a volume of tokens.
-- Capture before/after screenshots showing app grouping and bulk revoke, plus the two probe sweep
-  counts from the issue's acceptance.
-- If the probe loop is operator-run, state its already-shipped evidence and remaining operator
-  verification honestly in the issue/PR; never fabricate counts.
-
-## Verification blocker — RESOLVED 2026-08-16
-Staging was repaired by the operator (health 200). The rebased branch `c4499de` was deployed via
-`deploy-staging-oauth3.sh`, the signed-in `u-swarm` Tier 2 walk was run, and the screenshots plus
-sweep counts are committed under `.evidence/issue-119/`. The retention half stays blocked on #122.
+- Live demo serves: `https://pod.dstack.soc1024.com/otterscope/` → 200.
+- Instance base on the shared pod is `https://pod.dstack.soc1024.com/oauth3`
+  (`/oauth3/api/plugins` 200; root `/api/plugins` 404).
+- otterscope (webhost-apps `otterscope/server.ts`) calls
+  `window.oauth3.connect({node: location.origin+"/oauth3", plugin:"otter", app:"otterscope"})`
+  and reads `${node}/api/otter/items` with `Authorization: Bearer <token>`; token persisted in
+  localStorage; no cookie crosses to the app.
+- Extension leg (`oauth3-extension` provider-inject/bridge + `providerConnect` in
+  service-worker.js): approval dialog → `GET /api/plugins` → per-site consent check →
+  `POST /api/cookies` (transport) → `POST /api/connect` → `POST /api/connect/:id/approve`
+  (wallet session) → `GET /api/connect/:id` → `{status:"approved", token}` relayed to the page.
+- Connect-approved tokens are step-up-exempt (`server/connect.ts` `recordTokenUse` at mint;
+  landed in 19fb35d / #107), so the token's first `/items` read is a plain 200. Owner-minted
+  tokens (`POST /api/tokens`) still get one `409 challenge_pending` first read.
+- Read shapes (`server/handler.ts` ~1213): list `200 {plugin, items:[…], data:items}`; single
+  `200 {plugin, data:<item>}`; errors 401/404/409/502 per `docs/http-api.md`.
