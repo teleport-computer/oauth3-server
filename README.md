@@ -36,6 +36,14 @@ live HAR before trusting in prod.
                            /api/:plugin/items/:id    ◄──────────────── GET (Bearer token)
 ```
 
+**Live demo — [otterscope](https://pod.dstack.soc1024.com/otterscope/):** click *Connect
+Otter*; the extension hands the app a scoped token and it reads your conversations through the
+instance, never your cookie. The full provider flow — `window.oauth3.connect({node, plugin})` →
+scoped token → `GET {node}/oauth3/api/:plugin/items` — with request/response shapes is documented
+in [`docs/provider-flow.md`](docs/provider-flow.md). Apps normally use the
+[oauth3-sdk](https://github.com/teleport-computer/oauth3-sdk) `connect()` (provider-preferred,
+web fallback — [the app contract](docs/app-contract.md)) instead of the provider object directly.
+
 ## Run
 
 ```bash
@@ -140,6 +148,7 @@ Reference documentation lives in [`docs/`](docs/):
 - [`docs/architecture.md`](docs/architecture.md) — the runtime model: isolated-deno + `env_passthrough` secret injection, the multi-tenant subject model, the sealed per-identity vault, gateway path-routing on `listen.port 8080`.
 - [`docs/http-api.md`](docs/http-api.md) — every endpoint: method, path, auth required, request/response shapes, errors, plus a smoke-check→endpoint map.
 - [`docs/auth.md`](docs/auth.md) — the auth model in one place: owner secret vs web session vs scoped token, and which endpoints accept which.
+- [`docs/provider-flow.md`](docs/provider-flow.md) — the live otterscope demo and the provider flow end to end: `window.oauth3.connect({node, plugin})` → scoped token → token-backed `GET /oauth3/api/:plugin/items`, request/response shapes included.
 - [`docs/plugins.md`](docs/plugins.md) — authoring a plugin: the `Plugin` interface, how scoped-fetch constrains it, the copy-fill-register pattern.
 - [`docs/operator.md`](docs/operator.md) — operator guide: local dev, tee-daemon deploy, the dev / source-bound / attested trust postures, evidence verification, and seeding a jar.
 - [`docs/tinycloud.md`](docs/tinycloud.md) — the storage story: how oauth3 apps write to your TinyCloud (the `tc` CLI flows, capability self-grants, otter-importer as the worked example), pinned to a live node probe.
