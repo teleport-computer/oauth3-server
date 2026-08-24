@@ -78,11 +78,11 @@ export interface Plugin {
   accountId?(jar: Jar): string;
   listItems(jar: Jar, opts?: PluginListOptions): Promise<PluginItem[]>;
   fetchItem(jar: Jar, id: string): Promise<unknown>;
-  // Optional liked-videos read (youtube:liked, #144): the owner's liked-videos playlist as
-  // structured items (id, title, channel, length in meta). A distinct read chokepoint from
-  // listItems/watch-history, gated at readKind "liked". MUST throw (never return []) when the
-  // jar is logged out — a rotted jar must read as an error, not as "you liked nothing".
-  liked?(jar: Jar): Promise<PluginItem[]>;
+  // `liked?` used to live here (youtube:liked, #144) — one optional member of the interface every
+  // plugin implements, for a read exactly ONE plugin serves. It now registers itself in
+  // server/reads.ts instead. New read KINDS go there, not here: this interface is the credential
+  // contract (which jar, is it logged in, what account), and it should stop growing a member every
+  // time one site learns one new API shape. See the header of server/reads.ts.
   // Optional account-level read: identity + stats for the logged-in account (e.g. Reddit
   // username + karma breakdown). The narrow surface behind a scope ingredient like
   // `reddit:karma`. Gated at the handler's read chokepoint (readKind "account") like /items.
