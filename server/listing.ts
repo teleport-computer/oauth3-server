@@ -30,6 +30,7 @@ export type GateDecision = { decision: "allow" } | { decision: "devmode"; reason
 
 /** MVP static listing. Curated by operator; loaded before the connect gate runs. */
 export const STATIC_LISTING: Listing[] = [
+  { appId: "twitter-debug", allowedPlugins: ["twitter"], maxScope: "read", statement: "Debug view of the X browser inside the enclave under a scoped, revocable read token.", discharge: 1 },
   {
     appId: "demo-app",
     allowedPlugins: ["otter", "youtube", "reddit", "nytimes", "amazon"],
