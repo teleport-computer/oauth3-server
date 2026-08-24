@@ -1,0 +1,46 @@
+[0m[38;5;245m------- pre-test output -------[0m
+All locator tests passed.
+[0m[38;5;245m----- pre-test output end -----[0m
+[0m[38;5;245mrunning 4 tests from ./server/locator_test.ts[0m
+locator #154: migration — origin tombstone, destination home=self, valid signatures ...
+[0m[38;5;245m------- output -------[0m
+
+PODS (did:key):
+  origin       did:key:z6MkitRSwUn1ehcJAS7uoYDGAGs2avuTc1hG24wD11YcKvnw
+  destination  did:key:z6MkoznW5gCiTUA3WbEGXJVv67wLLHDRMj6P8ErXhWAbWTvy
+
+MIGRATION:
+  destination home   seq=1 home=https://dest.pod
+  origin tombstone   seq=2 movedTo=https://dest.pod
+  AC1  origin locator = MOVED → https://dest.pod ✓
+  AC2  destination locator = HOME → https://dest.pod (=self) ✓
+  AC1/AC2 signatures verify against each record's iss (pod did:key) ✓
+  REJECT  tampered movedTo fails signature check ✓
+[0m[38;5;245m----- output end -----[0m
+locator #154: migration — origin tombstone, destination home=self, valid signatures ... [0m[32mok[0m [0m[38;5;245m(7ms)[0m
+locator #154: stale read on origin → 410 + tombstone (the HTTP decision) ...
+[0m[38;5;245m------- output -------[0m
+
+AC3  stale read on origin: 410 + tombstone body ✓
+[0m[38;5;245m----- output end -----[0m
+locator #154: stale read on origin → 410 + tombstone (the HTTP decision) ... [0m[32mok[0m [0m[38;5;245m(169µs)[0m
+locator #154: helper resolves origin→destination in ONE hop, refuses two + loop ...
+[0m[38;5;245m------- output -------[0m
+
+AC4  followLocator(origin): origin moved → dest home in 1 hop ✓
+  visited: https://origin.pod → https://dest.pod  (hops=1)
+  REJECT  second hop (dest moved again) ✓
+  REJECT  loop (movedTo == origin) ✓
+  REJECT  404 dead end ✓
+[0m[38;5;245m----- output end -----[0m
+locator #154: helper resolves origin→destination in ONE hop, refuses two + loop ... [0m[32mok[0m [0m[38;5;245m(6ms)[0m
+locator #154: HTTP route — 200 home / 410 tombstone / 404 unknown / owner-gated PUT ...
+[0m[38;5;245m------- output -------[0m
+[init] ready — plugins: otter, youtube, reddit, nytimes, twitter, google-calendar, amazon, hackernews
+
+HTTP route (in-process handler): PUT owner-gated (401 w/o secret) · 200 home · 410 tombstone · 404 unknown — all signatures verify ✓
+[0m[38;5;245m----- output end -----[0m
+locator #154: HTTP route — 200 home / 410 tombstone / 404 unknown / owner-gated PUT ... [0m[32mok[0m [0m[38;5;245m(5ms)[0m
+
+[0m[32mok[0m | 4 passed | 0 failed [0m[38;5;245m(22ms)[0m
+

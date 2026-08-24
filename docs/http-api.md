@@ -77,6 +77,16 @@ an expired jar as `409`, an unknown plugin as `404`, etc.
 - Response: `{ "ok": boolean, "revoked": boolean }`
 - Once revoked, reads with that token return `401` (see `verify()` in `tokens.ts`).
 
+### `POST /api/introspect`
+- Auth: scoped token in `Authorization: Bearer <token>`; unknown, revoked, or missing
+  tokens are answered as inactive rather than rejected.
+- Request: no body.
+- Active response `200`:
+  `{ "active": true, "plugin": "otter", "subject": "u-…", "app": "sink-app", "caps": [] }`
+- Inactive response `200`: `{ "active": false }`
+- Revoked and garbage tokens have the same inactive shape, so callers cannot probe whether a
+  token was once valid. Revocation is reflected on the next introspection request without a restart.
+
 ## Connect / approval handshake (delegation)
 
 ### `POST /api/connect`
@@ -116,20 +126,41 @@ an expired jar as `409`, an unknown plugin as `404`, etc.
 
 ### `GET /api/:plugin/screenshot`
 - Auth: `token` (for `:plugin`) **or** `owner`. Renders a logged-in page via the configured
-  Browser SPI (`BROWSER_SPI_URL`) using the **same** sealed jar as `/items`.
+  Browser SPI (`BROWSER_SPI_URL`, authenticated with the `BROWSER_SPI_SECRET` bearer — both must
+  ride `env_passthrough`) using the **same** sealed jar as `/items`.
 - Query: `?url=<target>` (defaults to the plugin's `renderUrl`, else `https://www.<first cookieDomain>`).
 - Response `200`: `{ "plugin", "url", …shot fields }` (whatever the Browser SPI returns)
 - `404` unknown plugin · `401` unauthorized · `409` no jar / not logged in · `502` render error
+  (incl. `browser SPI /session 401: unauthorized` when `BROWSER_SPI_SECRET` is missing/wrong — issue #14)
 
 ## Audit
+
+> **Spec amended #120 (2026-08-05):** the audit store is now bounded — AGE 90d
+> (`RETENTION_MAX_AGE_DAYS`) **and** newest 1000 rows (`RETENTION_MAX_ENTRIES`), enforced on
+> every `audit()` write and again at boot (an over-policy store self-heals on next boot). This
+> replaces the prior hidden cap of **5000 rows**, which had no age bound and no operator
+> visibility (the ~800 KB / 5000-entry store on staging was the symptom). Collapsing repeated
+> consecutive events into one summarized row is a dashboard **view** concern
+> (`dashboard-page.ts`); it does not change the response shape below, which still returns the
+> full per-event trail.
 
 ### `GET /api/audit`
 - Auth: `session` **or** `owner`. Owner sees the whole log; everyone else sees entries whose
   `detail.subject` matches theirs.
-- Response: `{ "audit": [{ "ts","action","detail" }, …] }` (most-recent first, capped at 5000)
+- Response: `{ "audit": [{ "ts","action","detail" }, …] }` (most-recent first; bounded by the
+  retention policy above — age 90d / newest 1000)
 - Recorded actions: `cookies.sync`, `cookies.delete`, `token.mint`, `token.revoke`,
   `connect.request`, `connect.approve`, `connect.deny`, `read`, `screenshot`, `passkey.*`,
   `login.*`, `links.unlink`.
+
+### `POST /api/audit/prune`
+- Auth: `owner` only (`401 { "error": "owner only" }` otherwise).
+- Applies the retention policy now and reports the audit-store size before vs. after, plus the
+  reduction (if any) that ran at boot on the real on-disk store. Idempotent — on a store already
+  within policy it removes `0` and reports equal before/after.
+- Response `200`: `{ "before": {"entries","bytes"}, "after": {"entries","bytes"},
+  "removed": <n>, "policy": {"maxAgeDays":90,"maxEntries":1000},
+  "boot": {"before":<n>,"after":<n>,"removed":<n>} | null }`.
 
 ## Sign-in, account, linking
 
@@ -189,21 +220,21 @@ login page omits the button. OpenKey is client-side SIWE, always available.
 
 ---
 
-## Journey → endpoint map
+## Smoke-check → endpoint map
 
-How the user journeys in [`USER-JOURNEYS.md`](../USER-JOURNEYS.md) map to this API. There is
+How the smoke checks in [`SMOKE-CHECKS.md`](../SMOKE-CHECKS.md) map to this API. There is
 **no automated test suite yet**; the verification evidence today is the live end-to-end runs
-recorded in `USER-JOURNEYS.md` (M1) plus `deno check server/main.ts`.
+recorded in `SMOKE-CHECKS.md` (M1) plus `deno check server/main.ts`.
 
-| journey | endpoints / surface |
+| smoke check | endpoints / surface |
 |---|---|
-| **J1** no-install cookie read | `POST /api/cookies` → `POST /api/tokens` → `GET /api/:plugin/items` (CLI: `cli sync/token/read`) |
-| **J2** extension ingest | `POST /api/cookies` (extension auto-syncs on cookie-change + 30m) |
-| **J3** connect & grant | `POST /api/connect` → `GET /approve/:id` (user) / `POST /api/connect/:id/approve` → `GET /api/connect/:id` (poll) → `GET /api/:plugin/items` (token) → `DELETE /api/tokens/:token` |
-| **J4** app delivers value | same as J3; the app holds only the `tok-…` |
-| **J5** browser capture | `GET /api/:plugin/screenshot` (Browser SPI; worker unbuilt — M2) |
-| **J6** add a site | the [`Plugin` interface](./plugins.md) + `registry.ts` (no endpoint) |
-| **J7** app gets listed | not built (#6) |
+| **S1** no-install cookie read | `POST /api/cookies` → `POST /api/tokens` → `GET /api/:plugin/items` (CLI: `cli sync/token/read`) |
+| **S2** extension ingest | `POST /api/cookies` (extension auto-syncs on cookie-change + 30m) |
+| **S3** connect & grant | `POST /api/connect` → `GET /approve/:id` (user) / `POST /api/connect/:id/approve` → `GET /api/connect/:id` (poll) → `GET /api/:plugin/items` (token) → `DELETE /api/tokens/:token` |
+| **S4** app delivers value | same as S3; the app holds only the `tok-…` |
+| **S5** browser capture | `GET /api/:plugin/screenshot` (Browser SPI; worker unbuilt — M2) |
+| **S6** add a site | the [`Plugin` interface](./plugins.md) + `registry.ts` (no endpoint) |
+| **S7** app gets listed | not built (#6) |
 
 ## CORS & headers
 

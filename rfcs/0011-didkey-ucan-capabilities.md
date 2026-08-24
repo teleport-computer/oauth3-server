@@ -1,6 +1,6 @@
 # RFC 0011: did:key UCAN Capabilities — offline delegation for out-of-loop flows
 
-**Status**: Draft (spike landed alongside)
+**Status**: Superseded — the spike dialect below (array-shaped `att` of `{with,can,nb}`, `ucv:"0.1-oauth3"`) was replaced by the TinyCloud did:key UCAN-JWT dialect in #150 / PR #155 (2026-08-10). The body below is retained as the historical record of the spike; the normative dialect now lives in `server/ucan.ts` per issue #150's "Dialect rules". See the **Changelog** entry at the bottom.
 
 ## Summary
 oauth3's live tokens are opaque, server-enforced bearer strings (`tok-<plugin>-<rand>`): the
@@ -85,3 +85,22 @@ A single `deno test server/ucan_test.ts` run that PRINTS its work and asserts, e
 
 Done = that test passes and its printed transcript shows all six behaviors. This is the reusable
 `server/ucan.ts` the screenshare direct-signing consent will import.
+
+## Changelog
+- **2026-08-10 — Superseded by the TinyCloud did:key UCAN-JWT dialect (#150 / PR #155).** The spike's
+  array-shaped `att: [{with,can,nb?}]` / `nb:{maxRate,until,sink}` / `ucv:"0.1-oauth3"` envelope is
+  deleted from `server/ucan.ts`. New normative shape (from issue #150, implemented in `server/ucan.ts`):
+  - `att` is an ERC-5573 resource→ability→caveats map (`Record<resource, Record<ability, Caveat[]>>`);
+    an empty caveat set serializes as `[{}]`; a bare `[]` is a hard parse error.
+  - Proofs are exact-byte CIDv1 (raw codec `0x55`, blake3-256, base32) over the JWT ASCII bytes
+    exactly as received — never re-serialized before hashing.
+  - Chain checks compare `iss`/`aud` by **exact string equality after stripping a `#fragment`** from
+    `iss` (NEVER prefix match — `did:key:z6MkAA` must NOT match `did:key:z6MkAAA`); `child.exp ≤
+    parent.exp`; `child.nbf ≥ parent.nbf`; capabilities attenuate by `/`-boundary-aware resource
+    prefix + identical ability.
+  - Reason for the change: host-portable grants and TinyCloud-ecosystem wire interop, which the
+    bespoke `0.1-oauth3` envelope could not provide.
+  - No live caller breaks: `server/ucan.ts` has zero importers outside `server/ucan_test.ts`, and the
+    screenshare-debug (#51) consumer is not yet wired — issue #150 is explicitly the format layer;
+    grant wiring is a separate issue. This is therefore a Tier 0 (no deployed behavior) change.
+- The original spike content above is preserved unchanged as history.

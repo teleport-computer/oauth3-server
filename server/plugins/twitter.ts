@@ -22,6 +22,18 @@ export const twitterPlugin: Plugin = {
     return !!jar["auth_token"];
   },
 
+  // #111: derive the account id from the jar so one identity can hold multiple twitter
+  // accounts. The `twid` cookie value is URL-encoded "u=<numeric id>" (e.g. "u%3D111").
+  // A logged-in session (auth_token present) without a parseable twid is malformed — we
+  // throw rather than guess, so syncing such a jar fails honestly instead of collapsing
+  // two accounts onto one "default" key.
+  accountId(jar: Jar): string {
+    const twid = jar["twid"];
+    const m = twid && decodeURIComponent(twid).match(/^u=(\d+)$/);
+    if (!m) throw new Error("twitter jar has no parseable twid cookie (u=<id>) — cannot derive account");
+    return m[1];
+  },
+
   async listItems(_jar: Jar): Promise<PluginItem[]> {
     throw new Error(BROWSER_PATH);
   },

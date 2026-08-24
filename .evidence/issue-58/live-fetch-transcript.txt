@@ -1,0 +1,4 @@
+evidence page location.href: https://78ffc78c25e0c8a9e64bb3a969ba6f226abae62d-8080.dstack-pha-prod7.phala.network/oauth3/evidence
+att-status (after fetch resolved): dev
+att-detail  (after fetch resolved):  — the measurement isn't pinned yet, so the trust story is in-progress. The source and enclave above are still inspectable. Verifier.
+verifier endpoint HTTP status (curl, same origin path): 404  (404 by design => dev-mode branch)

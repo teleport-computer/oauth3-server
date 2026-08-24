@@ -1,0 +1,5 @@
+page	path	indigo_in_dom	paper	bodyBg	screenshot
+| 01-home | / | nav OK | indigo:absent✅ | --paper:#0e1f21 | bg:rgb(14, 31, 33) | h1:"Delegate access — without handing over your passwords or coo" | screenshot:captured✅ |
+| 02-privacy | /privacy | nav OK | indigo:absent✅ | --paper:#0e1f21 | bg:rgb(14, 31, 33) | h1:"Privacy policy" | screenshot:captured✅ |
+| 03-terms | /terms | nav OK | indigo:absent✅ | --paper:#0e1f21 | bg:rgb(14, 31, 33) | h1:"Terms of service" | screenshot:captured✅ |
+| 04-evidence | /evidence | nav OK | indigo:absent✅ | --paper:#0e1f21 | bg:rgb(14, 31, 33) | h1:"Evidence — don't trust, verify" | screenshot:captured✅ |

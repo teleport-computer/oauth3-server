@@ -70,7 +70,7 @@ So a plugin author's contract is: be honest in `loggedIn` (a real key cookie), k
 `listItems`/`fetchItem` pure functions of the jar, and **propagate** site errors (a thrown
 error becomes a `502` with the message — do not swallow/mask).
 
-## Authoring a new plugin (J6)
+## Authoring a new plugin (S6)
 
 1. Log into the site in a normal browser; open DevTools → Network; do the thing you want to
    read (open the saved list, history, …). Save a HAR.
@@ -96,10 +96,20 @@ error becomes a `502` with the message — do not swallow/mask).
   (env arrives via the handler's `ctx.env`); a top-level `Deno.env.get` throws at import and
   crashes the container. Use a `configure<Plugin>(env)` function the handler calls at init
   (see `configureOtter`).
+- Do **not** add a **static** `import … from "npm:<pkg>"` at module top level if the package
+  — or any of its transitive deps — reads `process.env`/`Deno.env` at load. The isolated
+  container runs `--deny-env`, so a transitive env read at import time throws `NotCapable` and
+  crashes the container exactly like a direct top-level `Deno.env.get`. This was the #49 bug:
+  a top-level `import { Rettiwt } from "npm:rettiwt-api"` pulled in `debug`, which runs
+  `Object.keys(process.env)` at module load → `NotCapable: Requires env access` → the
+  container never booted → every route 500. Make such imports **lazy**
+  (`const { X } = await import("npm:<pkg>")` inside the function that needs them). The
+  structural guard in `server/boot_deny_env_test.ts` (#140) fails the build if a static
+  `npm:rettiwt-api` import re-appears in `server/`. *(2026-07-28, #49/#140.)*
 - Set a fetch timeout: `signal: AbortSignal.timeout(60_000)`.
 - On `401`/`403` from the site, throw a clear "jar rejected — cookies expired" message (the
   handler turns a thrown error into `502`).
 - Paginate / cap page sizes if a full list trips gateway timeouts.
 
 The pattern is proven end-to-end: `otter`, `reddit`, `nytimes`, `youtube` were all added this
-way with **no core changes** (journey J6 ●). The only hard part is reading the live HAR.
+way with **no core changes** (smoke check S6 ●). The only hard part is reading the live HAR.

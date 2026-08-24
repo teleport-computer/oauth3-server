@@ -9,6 +9,7 @@ export interface Token {
   subject?: string;
   app?: string;
   caps?: string[]; // extra capabilities beyond read (e.g. "jar" = raw-jar release, "write:event:<id>" = one-event edit)
+  account?: string; // #111: bind the token to ONE account's jar when a subject holds several for this plugin
   createdAt: number;
   revokedAt?: number;
 }
@@ -27,9 +28,13 @@ export async function initTokens(dir: string): Promise<void> {
   catch (e) { if (!(e instanceof Deno.errors.NotFound)) throw e; }
 }
 
-export async function mint(plugin: string, subject?: string, app?: string, caps?: string[]): Promise<Token> {
+// #131: a token MUST carry a subject. `subject` is REQUIRED (compile-time guard for every caller)
+// and empty strings are rejected at runtime — no subjectless token can be created here. The read
+// side (handler `jarSubject`) still defends against any subjectless token persisted from before.
+export async function mint(plugin: string, subject: string, app?: string, caps?: string[], account?: string): Promise<Token> {
+  if (!subject) throw new Error("mint: subject is required (a token must be bound to a subject)")
   const token = `tok-${plugin}-${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
-  const t: Token = { token, plugin, subject, app, ...(caps?.length ? { caps } : {}), createdAt: Date.now() };
+  const t: Token = { token, plugin, subject, app, ...(caps?.length ? { caps } : {}), ...(account ? { account } : {}), createdAt: Date.now() };
   tokens[token] = t;
   await persist();
   return t;
@@ -58,6 +63,29 @@ export async function revoke(token: string): Promise<boolean> {
   return true;
 }
 
+export async function importTokens(grants: Token[]): Promise<number> {
+  for (const grant of grants) {
+    if (!grant || typeof grant.token !== "string" || typeof grant.plugin !== "string" ||
+      typeof grant.subject !== "string") throw new Error("malformed grant row");
+    tokens[grant.token] = { ...grant };
+  }
+  if (grants.length) await persist();
+  return grants.length;
+}
+
+export async function revokeSubject(subject: string): Promise<number> {
+  let count = 0;
+  for (const token of Object.values(tokens)) {
+    if (token.subject === subject && !token.revokedAt) { token.revokedAt = Date.now(); count++; }
+  }
+  if (count) await persist();
+  return count;
+}
+
 export function listTokens(): Token[] {
   return Object.values(tokens).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export function tokensForSubject(subject: string): Token[] {
+  return listTokens().filter((token) => token.subject === subject);
 }

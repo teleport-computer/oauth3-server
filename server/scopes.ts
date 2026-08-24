@@ -1,3 +1,5 @@
+import { loadSites } from "./plugins/declarative.ts";
+
 // Composable "scope ingredients" — the credential dial made legible and enforceable.
 // A token's caps may name one or more ingredients; each ingredient whitelists a set of
 // read kinds (the endpoint chokepoints in handler.ts). A token that carries NO ingredient
@@ -19,6 +21,11 @@ export const SCOPE_INGREDIENTS: Record<string, { plugin: string; reads: string[]
       label:
         "read-only · your Reddit account identity (username) and karma (comment + link) · not your saved posts, feed, votes, or messages",
     },
+    "codex:usage-read": {
+      plugin: "codex",
+      reads: ["quota"],
+      label: "read-only · your ChatGPT/Codex 5-hour and weekly usage windows · not prompts, responses, or account credentials",
+    },
     // #88: novel consumed scopes seeded by the composable utilities (feedling, calendar-share).
     // Each maps to a real read chokepoint in handler.ts, so a token carrying the cap is
     // confined exactly like otter:live-follow / reddit:karma — the consumed claim is enforced,
@@ -27,7 +34,17 @@ export const SCOPE_INGREDIENTS: Record<string, { plugin: string; reads: string[]
       plugin: "youtube",
       reads: ["feed"], // the /feed reconstruction of watch history (videos + Shorts)
       label:
-        "read-only · your watch history (videos and Shorts) · not your subscriptions, likes, comments, playlists, or uploads",
+        "read-only · your watch history (videos and Shorts) · not your liked videos, subscriptions, comments, playlists, or uploads",
+    },
+    // #144: the liked-videos read. A distinct read chokepoint (readKind "liked" at
+    // /api/youtube/liked) from watch history, so a history-only token CANNOT reach liked
+    // videos and vice versa — the confinement is the point. The label lists what's OUT so the
+    // approve dialog can't promise more than the cap grants (RFC 0004 anti-hollow-green).
+    "youtube:liked": {
+      plugin: "youtube",
+      reads: ["liked"], // GET /api/youtube/liked — the owner's liked-videos playlist (LL)
+      label:
+        "read-only · your liked videos (id, title, channel, length) · not your watch history, subscriptions, comments, playlists, or uploads",
     },
     "calendar:free-busy": {
       plugin: "google-calendar",
@@ -43,6 +60,19 @@ export const SCOPE_INGREDIENTS: Record<string, { plugin: string; reads: string[]
       reads: ["items"],
       label:
         "read-only · your Amazon cart line items (name, price, qty, ASIN) · not your address, payment, order history, or checkout",
+    },
+    // #98: the cart-write cap. A cart-share friend holds this to substitute ONE cart line
+    // (remove an ASIN, add a comparable ASIN within a price band + same category). reads:[]
+    // is load-bearing — it makes scopeReads(["amazon:cart-substitute"]) an EMPTY set, so a
+    // substitute-only token is denied at EVERY read chokepoint (it cannot read the cart,
+    // order history, address, or payment); the friend view reads via a separate amazon:cart-
+    // read cap. The write itself is gated by verifyCap at the substitute route + the
+    // server-side price-band/category/qty enforcement in the plugin (SubstituteDeniedError).
+    "amazon:cart-substitute": {
+      plugin: "amazon",
+      reads: [],
+      label:
+        "write · substitute ONE cart line — remove an ASIN, add ONE comparable ASIN within a price band and the same category · CANNOT check out, add arbitrary items, change address/payment, raise quantity, or read your cart/order history",
     },
     // #76: the first usage/metering scope. A token confined to the /quota read chokepoint —
     // your z.ai GLM Coding Plan usage numbers, nothing that touches the key or coding traffic.
@@ -68,12 +98,16 @@ export const PLUGIN_CAPABILITIES: Record<string, { plugin: string; statement: st
   youtube: {
     plugin: "youtube",
     statement:
-      "CAN read your watch history (videos and Shorts, each flagged isShort) and a logged-in screenshot of youtube.com. CANNOT like, subscribe, comment, remove from history, or upload.",
+      "CAN read your watch history (videos and Shorts, each flagged isShort), your liked videos (id, title, channel, length), and a logged-in screenshot of youtube.com. CANNOT like, subscribe, comment, remove from history, or upload.",
   },
   reddit: {
     plugin: "reddit",
     statement:
       "CAN read your saved posts and comments (and each item's full body/url), your account identity and karma (comment + link), and a logged-in screenshot of reddit.com. CANNOT save, vote, post, comment, or edit.",
+  },
+  codex: {
+    plugin: "codex",
+    statement: "CAN read your ChatGPT/Codex plan usage windows and reset times. CANNOT read prompts, responses, or expose the bearer credential.",
   },
   nytimes: {
     plugin: "nytimes",
@@ -93,7 +127,7 @@ export const PLUGIN_CAPABILITIES: Record<string, { plugin: string; statement: st
   amazon: {
     plugin: "amazon",
     statement:
-      "CAN read your Amazon cart line items and a logged-in screenshot of your cart. CANNOT check out, change address/payment, add items, or read order history.",
+      "CAN read your Amazon cart line items and a logged-in screenshot of your cart; a token MAY also carry an `amazon:cart-substitute` cap to swap ONE cart line for a comparable item within a price band and the same category. CANNOT check out, change address/payment, add arbitrary items, raise quantity, or read order history.",
   },
   zai: {
     plugin: "zai",
@@ -101,6 +135,31 @@ export const PLUGIN_CAPABILITIES: Record<string, { plugin: string; statement: st
       "CAN read your z.ai GLM Coding Plan usage numbers (5-hour and weekly quota %, total tokens, per-model breakdown, search/reader usage). CANNOT see your API key, prompts, code, or account settings, and can make no changes.",
   },
 };
+
+// Declarative longtail sites (server/plugins/sites/*.json) contribute their scope
+// ingredients + capability sentence the SAME way in-tree plugins do — merged into the
+// two ledgers above, so the gate (scopeReads), approve page, and /api/scopes enforce and
+// render them identically. A manifest scope is exactly as real as reddit:karma.
+{
+  const { ingredients, capabilities } = loadSites();
+  Object.assign(SCOPE_INGREDIENTS, ingredients);
+  Object.assign(PLUGIN_CAPABILITIES, capabilities);
+}
+
+// Runtime registration of a declarative site's scopes + capability (POST /api/sites, via
+// sites.ts) — merged into the SAME ledgers, so a dynamically-added site's scope enforces
+// and renders identically to an in-tree one. Unregister removes them again.
+export function registerSiteScopes(
+  ingredients: Record<string, { plugin: string; reads: string[]; label: string }>,
+  capabilities: Record<string, { plugin: string; statement: string }>,
+): void {
+  Object.assign(SCOPE_INGREDIENTS, ingredients);
+  Object.assign(PLUGIN_CAPABILITIES, capabilities);
+}
+export function unregisterSiteScopes(pluginId: string): void {
+  for (const id of Object.keys(SCOPE_INGREDIENTS)) if (SCOPE_INGREDIENTS[id].plugin === pluginId) delete SCOPE_INGREDIENTS[id];
+  delete PLUGIN_CAPABILITIES[pluginId];
+}
 
 // The full plugin-capability ledger (one statement per in-tree plugin). Public/read-only.
 export function pluginCapabilities(): { plugin: string; statement: string }[] {

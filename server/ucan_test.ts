@@ -1,136 +1,190 @@
-// End-to-end for the did:key UCAN capability path (RFC 0011), modeled on screenshare-debug #51's
-// direct-signing consent. Prints its work so the flow is OBSERVED, not just green. Run:
-//   deno test server/ucan_test.ts
-import { assert, assertEquals, assertRejects } from "jsr:@std/assert";
-import { canInvoke, Capability, decode, delegate, generateKeypair, mint, verify } from "./ucan.ts";
+import { assertEquals, assertRejects } from "jsr:@std/assert";
+import { cidForToken, decode, delegate, generateKeypair, mint, verify } from "./ucan.ts";
 
-const line = (s: string) => console.log("  " + s);
-const NOW = 1_800_000_000; // fixed clock so exp math is deterministic
+const NOW = 1_800_000_000;
+const space = (did: string) => `tinycloud:key:${did.slice("did:key:".length)}:demo`;
+const resource = (did: string, path = "foo") => `${space(did)}/kv/${path}`;
 
-Deno.test("did:key UCAN screen-stream capability — full e2e", async () => {
-  // three principals: oauth3 authority (root), the debug app, the streaming session
-  const authority = await generateKeypair();
-  const app = await generateKeypair();
-  const session = await generateKeypair();
-  console.log("\nPRINCIPALS (did:key):");
-  line(`authority ${authority.did}`);
-  line(`app       ${app.did}`);
-  line(`session   ${session.did}`);
-  const SINK = "did:key:zSINKabcSINKabcSINKabcSINKabc"; // the frame sink's identity (opaque here)
-  const STREAM = `stream://${SINK}`;
-  const opts = { root: authority.did, now: NOW };
-
-  // (1) MINT: authority grants the app a scoped screen-stream capability
-  const rootCap: Capability = {
-    with: STREAM,
-    can: "stream/frames",
-    nb: { maxRate: 1, until: NOW + 3600, sink: SINK },
-  };
-  const rootTok = await mint({
-    issuer: authority,
-    audience: app.did,
-    capabilities: [rootCap],
-    expiresInSec: 7200,
-    now: NOW,
-  });
-  console.log("\n(1) MINT authority→app:");
-  line(`JWT: ${rootTok.slice(0, 72)}…`);
-  line(`att: ${JSON.stringify(decode(rootTok).att)}`);
-
-  // (2) ATTENUATE: app re-delegates a NARROWER leaf (0.5 fps, sooner expiry, same sink) to the session
-  const leafCap: Capability = {
-    with: STREAM,
-    can: "stream/frames",
-    nb: { maxRate: 0.5, until: NOW + 1800, sink: SINK },
-  };
-  const leafTok = await delegate({
-    issuer: app,
-    audience: session.did,
-    capabilities: [leafCap],
+Deno.test("TinyCloud did:key UCAN mint → delegate → invoke chain", async () => {
+  const root = await generateKeypair(),
+    holder = await generateKeypair(),
+    leaf = await generateKeypair();
+  const parent = await mint({
+    issuer: root,
+    audience: holder.did,
     expiresInSec: 3600,
-    proofs: [rootTok],
     now: NOW,
+    capabilities: [{ with: resource(root.did), can: "kv/read", caveats: [{ until: NOW + 1800 }] }],
   });
-  console.log("\n(2) ATTENUATE app→session (1fps→0.5fps, 1h→30m):");
-  line(`chain length: ${decode(leafTok).prf.length + 1}`);
-  line(`leaf att: ${JSON.stringify(decode(leafTok).att)}`);
+  const child = await delegate({
+    issuer: holder,
+    audience: leaf.did,
+    expiresInSec: 1800,
+    now: NOW,
+    proofs: [parent],
+    capabilities: [{
+      with: resource(root.did, "foo/bar"),
+      can: "kv/read",
+      caveats: [{ until: NOW + 1200 }],
+    }],
+  });
+  const proofs = new Map([[cidForToken(parent), parent]]);
+  const result = await verify(child, { root: root.did, now: NOW, proofs });
+  assertEquals(result.iss, holder.did);
+  assertEquals(decode(child).att[resource(root.did, "foo/bar")]["kv/read"], [{
+    until: NOW + 1200,
+  }]);
+  console.log("\nPASS mint → delegate → verify; att map and CIDv1 proof validated");
+});
 
-  // (3) OFFLINE VERIFY + in-scope invoke ACCEPTED, anchored only on the authority DID
-  const chain = await verify(leafTok, opts);
-  assertEquals(chain.iss, app.did);
-  const cap = await canInvoke(leafTok, {
-    with: STREAM,
-    can: "stream/frames",
-    rate: 0.4,
-    sink: SINK,
-  }, opts);
-  console.log("\n(3) OFFLINE VERIFY (anchor = authority DID only, no network):");
-  line(`PASS  chain verified, invoke 0.4fps ACCEPTED by cap ${JSON.stringify(cap.nb)}`);
+Deno.test("TinyCloud UCAN rejects every specified malformed or widening case", async () => {
+  const root = await generateKeypair(),
+    holder = await generateKeypair(),
+    leaf = await generateKeypair();
+  const parent = await mint({
+    issuer: root,
+    audience: holder.did,
+    expiresInSec: 3600,
+    now: NOW,
+    capabilities: [{ with: resource(root.did), can: "kv/read" }],
+  });
+  const parentCid = cidForToken(parent), proofs = new Map([[parentCid, parent]]);
+  const child = (
+    cap: { with: string; can: string },
+    extra: Partial<Parameters<typeof delegate>[0]> = {},
+  ) =>
+    delegate({
+      issuer: holder,
+      audience: leaf.did,
+      expiresInSec: 1800,
+      now: NOW,
+      proofs: [parent],
+      capabilities: [cap],
+      ...extra,
+    });
 
-  // (4) FIVE distinct REJECTIONS
-  console.log("\n(4) REJECTIONS:");
-  // a. out-of-scope ability
-  await assertRejects(
-    () => canInvoke(leafTok, { with: STREAM, can: "stream/audio", sink: SINK }, opts),
-    Error,
+  const bare = JSON.parse(JSON.stringify(decode(parent))) as Record<string, unknown>;
+  (bare.att as Record<string, Record<string, unknown>>)[resource(root.did)]["kv/read"] = [];
+  const badBody = btoa(JSON.stringify(bare)).replace(/\+/g, "-").replace(/\//g, "_").replace(
+    /=+$/,
+    "",
   );
-  line("REJECT  out-of-scope ability (stream/audio) ✓");
-  // b. wrong sink
   await assertRejects(
-    () => canInvoke(leafTok, { with: STREAM, can: "stream/frames", sink: "did:key:zEVIL" }, opts),
+    () =>
+      import("./ucan.ts").then(({ decode }) =>
+        decode(`${parent.split(".")[0]}.${badBody}.${parent.split(".")[2]}`)
+      ),
     Error,
+    "bare []",
   );
-  line("REJECT  wrong sink ✓");
-  // c. rate above the attenuated cap
+  console.log("PASS bare [] caveat rejected");
+
+  const escape = await child({ with: resource(root.did, "foobar"), can: "kv/read" });
   await assertRejects(
-    () => canInvoke(leafTok, { with: STREAM, can: "stream/frames", rate: 5, sink: SINK }, opts),
+    () => verify(escape, { root: root.did, now: NOW, proofs }),
     Error,
+    "attenuated",
   );
-  line("REJECT  rate 5fps > 0.5fps cap ✓");
-  // d. expired token (evaluate after leaf until)
+  console.log("PASS non-boundary path escape rejected");
+
+  const widenedExpiry = await child({ with: resource(root.did), can: "kv/read" }, {
+    expiresInSec: 7200,
+  });
   await assertRejects(
-    () => verify(leafTok, { root: authority.did, now: NOW + 999_999 }),
+    () => verify(widenedExpiry, { root: root.did, now: NOW, proofs }),
+    Error,
+    "expiry widens",
+  );
+  console.log("PASS expiry widening rejected");
+
+  const wide = await child({ with: resource(root.did), can: "kv/write" });
+  await assertRejects(
+    () => verify(wide, { root: root.did, now: NOW, proofs }),
+    Error,
+    "attenuated",
+  );
+  console.log("PASS ability widening rejected");
+
+  const expired = await child({ with: resource(root.did), can: "kv/read" }, { now: NOW + 4000 });
+  await assertRejects(
+    () => verify(expired, { root: root.did, now: NOW + 4000, proofs }),
     Error,
     "expired",
   );
-  line("REJECT  expired token ✓");
-  // e. tampered signature
-  const parts = leafTok.split(".");
-  const bad = `${parts[0]}.${parts[1]}.${parts[2].slice(0, -4)}AAAA`;
-  await assertRejects(() => verify(bad, opts), Error, "signature");
-  line("REJECT  tampered signature ✓");
-  // f. over-broad re-delegation: app tries to grant MORE than it holds (2fps > its 1fps)
-  const greedy: Capability = {
-    with: STREAM,
-    can: "stream/frames",
-    nb: { maxRate: 2, until: NOW + 1800, sink: SINK },
-  };
-  const greedyTok = await delegate({
-    issuer: app,
-    audience: session.did,
-    capabilities: [greedy],
-    expiresInSec: 3600,
-    proofs: [rootTok],
+  console.log("PASS expiry widening/expired chain rejected");
+
+  const wrong = await delegate({
+    issuer: holder,
+    audience: leaf.did,
+    expiresInSec: 1800,
     now: NOW,
+    proofs: [parent],
+    capabilities: [{ with: resource(root.did), can: "kv/read" }],
   });
-  await assertRejects(() => verify(greedyTok, opts), Error, "attenuated");
-  line("REJECT  over-broad re-delegation (2fps > parent 1fps) ✓");
+  const wrongCid = new Map([[cidForToken(parent), wrong]]);
+  await assertRejects(
+    () => verify(wrong, { root: root.did, now: NOW, proofs: wrongCid }),
+    Error,
+    "wrong CID",
+  );
+  console.log("PASS wrong CID rejected");
 
-  console.log("\nRESULT: mint → attenuate → offline-verify → 6 behaviors all correct.\n");
-  assert(true);
-});
+  const fragmentIssuer = { ...holder, did: `${holder.did}#delegator` };
+  const fragment = await delegate({
+    issuer: fragmentIssuer,
+    audience: leaf.did,
+    expiresInSec: 1800,
+    now: NOW,
+    proofs: [parent],
+    capabilities: [{ with: resource(root.did), can: "kv/read" }],
+  });
+  await verify(fragment, { root: root.did, now: NOW, proofs });
+  console.log("PASS issuer fragment stripped before chain comparison");
 
-// A second, focused test: a capability minted by a DIFFERENT authority does not verify against ours.
-Deno.test("did:key UCAN — foreign root is rejected", async () => {
-  const ours = await generateKeypair();
-  const rogue = await generateKeypair();
-  const app = await generateKeypair();
-  const tok = await mint({
-    issuer: rogue,
-    audience: app.did,
-    capabilities: [{ with: "stream://x", can: "stream/frames" }],
+  const other = await generateKeypair();
+  const wrongAudienceParent = await mint({
+    issuer: root,
+    audience: other.did,
     expiresInSec: 3600,
+    now: NOW,
+    capabilities: [{ with: resource(root.did), can: "kv/read" }],
   });
-  await assertRejects(() => verify(tok, { root: ours.did }), Error, "trusted root");
-  console.log("  REJECT  token from a foreign root DID ✓");
+  const wrongAudienceChild = await delegate({
+    issuer: holder,
+    audience: leaf.did,
+    expiresInSec: 1800,
+    now: NOW,
+    proofs: [wrongAudienceParent],
+    capabilities: [{ with: resource(root.did), can: "kv/read" }],
+  });
+  const mismatchProofs = new Map([[cidForToken(wrongAudienceParent), wrongAudienceParent]]);
+  await assertRejects(
+    () => verify(wrongAudienceChild, { root: root.did, now: NOW, proofs: mismatchProofs }),
+    Error,
+    "issuer does not equal",
+  );
+  console.log("PASS audience comparison mismatch rejected");
+
+  const prefixParent = await mint({
+    issuer: root,
+    audience: `${holder.did}A`,
+    expiresInSec: 3600,
+    now: NOW,
+    capabilities: [{ with: resource(root.did), can: "kv/read" }],
+  });
+  const prefixChild = await delegate({
+    issuer: holder,
+    audience: leaf.did,
+    expiresInSec: 1800,
+    now: NOW,
+    proofs: [prefixParent],
+    capabilities: [{ with: resource(root.did), can: "kv/read" }],
+  });
+  const prefixProofs = new Map([[cidForToken(prefixParent), prefixParent]]);
+  await assertRejects(
+    () => verify(prefixChild, { root: root.did, now: NOW, proofs: prefixProofs }),
+    Error,
+    "issuer does not equal",
+  );
+  console.log("PASS DID-prefix attack rejected by exact comparison");
 });

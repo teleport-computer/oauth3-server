@@ -93,7 +93,7 @@ only via `verify(token, plugin)` (which rejects wrong-plugin and revoked tokens)
 - A web session lets you grant apps **without** re-handing the owner secret — preferred for
   human use (dashboard / approve page).
 - A scoped token is the **least** authority: one plugin, read-only, revocable. That is what
-  you hand to a third-party app (journey J3/J4).
+  you hand to a third-party app (smoke check S3/S4).
 - "Trust the code, not the operator" is a *separate* concern from this auth model — it is the
   TEE-measurement pin in [`operator.md`](./operator.md). Auth here only governs *who can ask
   the server to do what*; it does not attest the server itself.

@@ -24,6 +24,7 @@ Required/used env (see [`.env.example`](../.env.example) and `server/handler.ts 
 | `POLL_INTERVAL_MIN` | background scheduler cadence; default `30` |
 | `PUBLIC_URL` | canonical external origin (passkey rpId/origin, OAuth redirect URIs); strip trailing `/` |
 | `BROWSER_SPI_URL` | the Browser SPI base for `/screenshot` (render worker); blank → `502` on use |
+| `BROWSER_SPI_SECRET` | shared bearer the Browser SPI requires on every control endpoint (`/session`, `/screenshot`, …); blank → SPI returns `401` and `/screenshot` surfaces `502 browser SPI /session 401: unauthorized`. It is a **secret** — rides `env_passthrough`, never the manifest `env`. |
 | `OWNER_NAME`, `SOURCE_URL`, `OWNER_EMAIL`, `ATTESTATION_URL`, `INSTANCE_MODE` | copy on the public home/privacy/terms/evidence pages |
 | `GITHUB_CLIENT_ID/SECRET`, `GOOGLE_CLIENT_ID/SECRET` | federated login creds (else those routes `404`) |
 | `OTTER_BASE`, `GITHUB_OAUTH_BASE/API_BASE`, `GOOGLE_*_BASE` | per-plugin/provider overrides (for e2e mocks) |
@@ -47,7 +48,24 @@ oauth3-server runs as a tee-daemon **project** (no dedicated CVM).
 }
 ```
 
-Ship a build:
+> The snippet above is the **minimal dev** example; the shipped `project.json` also passes
+> through the `OAUTH3_OWNER_SECRET`/`OAUTH3_SEAL_KEY` aliases **and**
+> `BROWSER_SPI_URL`/`BROWSER_SPI_SECRET` (the SPI secret is mandatory — see the env table above
+> and issue #14). Copy the live file, not this snippet, when deploying.
+
+Ship a build (use the script — it reads the live manifest first and carries every field
+forward, so a redeploy can never drop the daemon-injected secrets):
+
+```bash
+bash deploy.sh https://your-daemon.dstack.phala.network [git-ref]
+# token: $TEE_DAEMON_TOKEN or ~/.tee-daemon-staging.env
+```
+
+The script pins the verified manifest (`isolation: container`, `oci_runtime: runc`,
+`listen: {port: 8080}` — path-based routing, no dedicated host port to conflict on),
+builds a flat tarball (`handler.ts` at the root, `deno check`-gated), POSTs it, then
+health-gates `/oauth3/api/health` and verifies the read-back manifest. The manual
+equivalent (do not use — this is how the env got wiped on 2026-08-10):
 
 ```bash
 TOKEN=…; CVM=https://your-daemon.dstack.phala.network
@@ -56,13 +74,24 @@ curl -X POST $CVM/_api/projects -H "Authorization: Bearer $TOKEN" \
   -F 'manifest=@server/project.json;type=application/json' -F "files=@oauth3.tgz"
 ```
 
-**Secret delivery.** `OWNER_SECRET` and `SEAL_KEY` must **not** be committed (they would land
-in the attested source tree). `project.json` lists them under `env_passthrough` so the daemon
-injects them from its own dstack-encrypted env. **Today** the daemon honors `env_passthrough`
+**Secret delivery.** `OWNER_SECRET`, `SEAL_KEY`, and `BROWSER_SPI_SECRET` must **not** be
+committed (they would land in the attested source tree). `project.json` lists them under
+`env_passthrough` so the daemon injects them from its own dstack-encrypted env.
+`BROWSER_SPI_SECRET` rides `env_passthrough` for the same reason: `browser.ts` sends it as the
+`Authorization: Bearer` on every SPI call, so if it is absent the render path 502s with
+`browser SPI /session 401: unauthorized` (issue #14). **Today** the daemon honors `env_passthrough`
 for the `image` runtime but not yet for isolated deno (`tee-daemon` `ISSUES.md` #13, ~4-line
 fix). Until that lands: deploy as an `image` runtime, **or** rely on dstack LUKS2 +
 per-project volume isolation for at-rest protection (the daemon derives `SEAL_KEY` from TEE
 material via `GetKey → HKDF` in the intended design).
+
+> **Redeploying an existing instance?** The manifest-preserving redeploy recipe and the three
+daemon-side gotchas live in [`deploy.md`](./deploy.md): why `listen.port` is **8080** (the
+screenshare-frames project owns port 3000 on the node), why an empty `container_id` in
+`/_api/projects` does **not** mean the project is down, and the read-the-live-manifest-first
+rule (`GET {node}/_api/projects` before any POST — a partial manifest wiped the live env and
+500’d the instance for hours). This section covers first-time deploy; that page covers keeping
+it up.
 
 ## 3. Trust postures (dev / source-bound / attested)
 
@@ -114,10 +143,10 @@ issue adds one, it belongs in [`http-api.md`](./http-api.md).
 
 ## 5. Seeding a cookie jar for a new instance
 
-Three ingest paths (journeys J1/J2 + the API-key path). All write the same sealed vault
+Three ingest paths (smoke checks S1/S2 + the API-key path). All write the same sealed vault
 (`DATA_DIR/vault.sealed`, keyed `<subject>:<plugin>`).
 
-**A. Paste-cookie (no extension, no browser) — J1.** Copy the cookie from DevTools
+**A. Paste-cookie (no extension, no browser) — S1.** Copy the cookie from DevTools
 (Application → Cookies) and POST it as the owner (or a session):
 
 ```bash
@@ -129,7 +158,7 @@ curl -s localhost:3000/api/cookies \
 deno run -A cli.ts sync otter --cookie 'sessionid=…,csrftoken=…' --owner $OWNER_SECRET
 ```
 
-**B. Extension (auto-sync) — J2.** Load `oauth3-extension` unpacked, set the instance URL +
+**B. Extension (auto-sync) — S2.** Load `oauth3-extension` unpacked, set the instance URL +
 owner secret, pick the plugin, **Sync jar now**. It then re-syncs on cookie-change + a 30m
 alarm, keeping the jar fresh with no further action.
 

@@ -1,32 +1,47 @@
 // Routes:
 //   GET    /api/health
 //   GET    /api/plugins                       list plugins + jar status
+//   GET    /api/sites                         owner — list registered declarative sites (RFC 0012)
+//   POST   /api/sites     {manifest}          owner — register a longtail site as data, no deploy
+//   DELETE /api/sites/:id                      owner — unregister a runtime site
 //   POST   /api/cookies   {plugin,cookies}    owner — extension/CLI syncs a jar
 //   POST   /api/tokens    {plugin,subject}    owner — mint a scoped read token
 //   GET    /api/tokens                        owner — list tokens
 //   DELETE /api/tokens/:token                 owner — revoke a token
+//   POST   /api/introspect                    bearer token — verify a scoped token
 //   GET    /api/audit                         owner — audit log
-//   GET    /api/promote                       owner — proposed scope ingredients from observed reads
+//   GET    /api/jars                          owner — vault directory of current (subject, plugin) jars (#170)
+//   POST   /api/export {destinationPublicKey,subject?} owner/did:key — encrypted migration bundle
+//   POST   /api/audit/prune                    owner — apply retention policy, report before/after sizes (#120)
+//   GET    /api/promote                       signed-in user — proposed scope ingredients from observed reads
+//   POST   /api/tokens/:token/tighten          signed-in user — revoke and re-mint with a named ingredient
 //   GET    /api/scopes                        public — enforced scope-ingredient ledger + app consumes/offers (#88)
 //   GET    /api/scopes/:id                    public — one enforced ingredient (404 if unknown)
+//   GET    /api/locator/:did                   public — RFC 0013 home pointer (200) or MOVED tombstone (410)
+//   PUT    /api/locator/:did {home|movedTo}    owner — set/refresh home (import) or write tombstone (export-confirm)
 //   GET    /scopes                            public — the composable-utilities panel (rendered view of /api/scopes, #88)
 //   POST   /api/connect   {plugin,subject?,app?}   app — start the grant handshake
 //   GET    /api/connect/:requestId            app — poll status (token once approved)
 //   POST   /api/connect/:requestId/approve|deny  owner_secret — the user's decision
 //   GET    /approve/:requestId                HTML approval screen
 //   GET    /api/:plugin/account              scoped token OR owner — account-level data (identity + karma)
-//   GET    /api/:plugin/quota                scoped token OR owner — usage/quota numbers (e.g. z.ai Coding Plan)
+//   GET    /api/:plugin/quota                scoped token OR owner — provider usage/quota numbers (e.g. z.ai Coding Plan, ChatGPT Codex)
 //   GET    /api/:plugin/items[/:id]           scoped token OR owner — read
+//        list (/items)    → {plugin, items:[{id,title,date?,meta?}], data:items}  (prefer `items`; `data` is a back-compat alias)
+//        one   (/items/:id) → {plugin, data:<item>}
+//   GET    /api/:plugin/:kind                    scoped token OR owner — any REGISTERED named read (server/reads.ts),
+//                                                 e.g. /api/youtube/liked (readKind "liked", #144). Same gate as every read above.
 //   GET    /api/:plugin/live[?after=N]        scoped token OR owner — live item segments + frame urls
 //   GET    /api/:plugin/frame?u=<b64url>      scoped token OR owner — proxy one shared-screen image (binary)
 //   GET    /api/:plugin/screenshot            scoped token OR owner — logged-in render via Browser SPI
 
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
+import { getRead } from "./reads.ts";
 import { configureEgress, egressFetch, egressProxy } from "./egress.ts";
-import { deleteJar, getJar, initVault, jarStatus, setJar } from "./vault.ts";
-import { initTokens, listTokens, mint, revoke, type Token, verify, verifyCap } from "./tokens.ts";
+import { allJarStatuses, AmbiguousAccountError, deleteJar, deleteMigrating, entriesForExport, getJar, initVault, installEntries, jarsFor, markMigrating, setJar, strandedJars } from "./vault.ts";
+import { importTokens, initTokens, listTokens, mint, revoke, revokeSubject, tokensForSubject, type Token, verify, verifyCap } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
-import { audit, auditLog, initAudit } from "./audit.ts";
+import { audit, auditLog, initAudit, pruneAudit } from "./audit.ts";
 import { formatAuditDecision, gate, Scope, STATIC_LISTING } from "./listing.ts";
 import { getListings, initListings } from "./listings.ts";
 import { initEval, logEval, updateEvalOutcome } from "./eval.ts";
@@ -40,32 +55,56 @@ import { evidencePage, homePage, privacyPage, termsPage } from "./home-page.ts";
 import { createSession, destroySession, initSessions, verifySession } from "./sessions.ts";
 import { newChallenge, verifyDidSignIn } from "./identity.ts";
 import { allCredentialIds, credentialsFor, initPasskeys, passkeyChallenge, verifyAuthentication, verifyRegistration } from "./passkey.ts";
-import { consumeState, enabledProviders, githubAuthUrl, githubEnv, githubExchange, googleAuthUrl, googleEnv, googleExchange, newState } from "./oidc.ts";
+import { consumeState, enabledProviders, githubAuthUrl, githubEnv, githubExchange, googleAuthUrl, googleCalendarAuthUrl, googleCalendarExchange, googleEnv, googleExchange, newState } from "./oidc.ts";
 import { configureOtter } from "./plugins/otter.ts";
 import { configureReddit } from "./plugins/reddit.ts";
-import { configureAmazon } from "./plugins/amazon.ts";
+import { configureCodex } from "./plugins/codex.ts";
+import { amazonPlugin, configureAmazon } from "./plugins/amazon.ts";
+import { configureGoogleCalendar } from "./plugins/google-calendar.ts";
 import { configureZai } from "./plugins/zai.ts";
+import type { Jar, SubstituteOp } from "./plugins/types.ts";
 import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.ts";
 import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot, browserFeed } from "./browser.ts";
 import { apiLike, apiMe, apiTimeline, apiTweet, apiUnlike, browserTrace } from "./twitter-actions.ts";
 import { appDeclarations, pluginCapabilities, scopeIngredient, scopeIngredients, scopeLabel, scopeReads } from "./scopes.ts";
+import { deletePersistedSite, hydratePersistedSites, listSites, persistSite, registerSite, unregisterSite } from "./sites.ts";
 import { proposeIngredients } from "./promoter.ts";
-import { approveChallenge, createChallenge, denyChallenge, getChallenge, recordTokenUse, score, wasFirstUse } from "./stepup.ts";
+import { approveChallenge, createChallenge, denyChallenge, getChallenge, initStepup, recordTokenUse, score, wasFirstUse } from "./stepup.ts";
+import { createLocatorStore, locatorGetResponse, type LocatorStore } from "./locator.ts";
+import { encryptExport } from "./export.ts";
+import { decryptMigration, signReceipt, verifyReceipt, type ConfirmReceipt, type EncryptedExport } from "./migration.ts";
 
 let ready = false;
 let ownerSecret = "";
 let publicUrl = "";
 let browserSpiUrl = "";
 let browserSpiSecret = "";
+let locator: LocatorStore | null = null;
 
 export interface HandlerCtx { env: Record<string, string>; dataDir?: string; }
 
 async function init(env: Record<string, string>, dataDir: string) {
   if (ready) return;
-  await initVault(dataDir, env.SEAL_KEY || env.OAUTH3_SEAL_KEY || "");
+  await initVault(dataDir, env.SEAL_KEY || env.OAUTH3_SEAL_KEY || "", (pid, jar) => {
+    // #111: derive the account label the SAME way sync does. A plugin with an accountId hook
+    // (twitter) keys per account; every other plugin keys under "default". This callback runs
+    // only for MIGRATION of legacy 2-part keys — a best-effort recovery, so a legacy jar that
+    // can't yield an id (e.g. a pre-twid twitter session) falls back to "default" with a
+    // warning rather than bricking startup. The LIVE sync path (POST /api/cookies) stays
+    // strict — it calls plugin.accountId directly and propagates the error.
+    const p = getPlugin(pid);
+    if (!p?.accountId) return "default";
+    try {
+      return p.accountId(jar);
+    } catch (e) {
+      console.warn(`[vault] migration: ${pid} jar underivable account (${(e as Error).message}) → "default"`);
+      return "default";
+    }
+  });
   await initTokens(dataDir);
   await initConnect(dataDir);
+  await initStepup(dataDir);
   await initAudit(dataDir);
   await initSessions(dataDir);
   await initPasskeys(dataDir);
@@ -73,9 +112,14 @@ async function init(env: Record<string, string>, dataDir: string) {
   configureOtter(env);
   configureReddit(env);
   configureAmazon(env);
+  configureGoogleCalendar(env);
   configureZai(env);
+  configureCodex(env);
   await initListings(dataDir);
+  locator = await createLocatorStore(dataDir);
   await initEval(dataDir);
+  const nSites = hydratePersistedSites(dataDir);
+  if (nSites) console.log(`[init] hydrated ${nSites} runtime site(s) from ${dataDir}/sites`);
   ownerSecret = env.OWNER_SECRET || env.OAUTH3_OWNER_SECRET || env.EXT_SHARED_SECRET || "";
   publicUrl = (env.PUBLIC_URL || "").replace(/\/$/, "");
   browserSpiUrl = (env.BROWSER_SPI_URL || "").replace(/\/$/, "");
@@ -93,6 +137,15 @@ function json(obj: unknown, status = 200): Response {
     headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
   });
 }
+// #131: a scoped token MUST carry a subject. The old `t.subject ?? "owner"` silently read the
+// OWNER's (usually stale) jar and then blamed the user's cookies — the single biggest cause of
+// bogus "app is broken" reports. No fallback: reject a subjectless token. `t` is null only on the
+// owner-authenticated path (every caller 401s when `!isOwner(req) && !t`), so owner stays correct.
+function jarSubject(t: Token | null): string | Response {
+  if (!t) return "owner";
+  if (!t.subject) return json({ error: "token has no subject — remint the token with a subject (#131)" }, 400);
+  return t.subject;
+}
 function html(body: string): Response {
   return new Response(body, { headers: { "Content-Type": "text/html; charset=utf-8" } });
 }
@@ -103,6 +156,27 @@ function landingHtml(session: string | null, returnUrl: string, note: string): s
   return `<!doctype html><meta charset=utf-8><body style="font:15px system-ui;max-width:30rem;margin:3rem auto;color:#111"><p>${note} Redirecting…</p><script>${set}location.href=${JSON.stringify(returnUrl)};</script>`;
 }
 const isOwner = (req: Request) => !!ownerSecret && req.headers.get("Authorization") === `Bearer ${ownerSecret}`;
+
+// #111: resolve a read jar, turning AmbiguousAccountError (a subject holding several
+// accounts for this plugin, none named) into a 409 carrying the available accounts so the
+// client can re-ask with ?account= or a token bound to one. Every token/owner read
+// chokepoint routes through here so ambiguity is surfaced, never silently resolved.
+type JarResolve = { ok: true; jar: Jar } | { ok: false; resp: Response };
+function readJar(subj: string, pluginId: string, account?: string): JarResolve {
+  try {
+    const jar = getJar(subj, pluginId, account);
+    if (!jar) return { ok: false, resp: json({ error: `no jar synced for ${pluginId}` }, 409) };
+    return { ok: true, jar };
+  } catch (e) {
+    if (e instanceof AmbiguousAccountError) {
+      return {
+        ok: false,
+        resp: json({ error: `multiple accounts synced for ${pluginId}; pass ?account=<id> or bind the token to one`, accounts: e.accounts }, 409),
+      };
+    }
+    throw e;
+  }
+}
 
 async function sha256hex(s: string): Promise<string> {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
@@ -125,6 +199,11 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
 
   const url = new URL(req.url);
   const path = url.pathname;
+  // Version pin (CONSTITUTION Tier 1): lets an HTTP transcript pin the running core to a
+  // PR commit. GIT_SHA is injected at deploy (env); "dev" when unset (local/in-process).
+  if (req.method === "GET" && path === "/_api/version") {
+    return json({ service: "oauth3-server", commit: ctx.env?.GIT_SHA || "dev" });
+  }
   const origin = publicUrl || url.origin;
   // Session = a token in the Authorization header (the daemon proxy forwards it;
   // it strips cookies). The login/approve pages keep it in localStorage.
@@ -141,26 +220,27 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   if (req.method === "GET" && path === "/terms") return html(termsPage(ctx.env));
   if (req.method === "GET" && path === "/evidence") return html(evidencePage(ctx.env));
 
-  // User journeys test report — static HTML from disk if available.
-  if (req.method === "GET" && (path === "/journeys" || path === "/journeys/")) {
-    const journeysPath = (ctx.dataDir || ".") + "/journeys/index.html";
+  // Smoke-check report — static HTML served from disk when an operator/cron has uploaded it.
+  // Renamed from /journeys in #81 (the suite is flow verification, not a user journey).
+  if (req.method === "GET" && (path === "/smoke" || path === "/smoke/")) {
+    const reportPath = (ctx.dataDir || ".") + "/smoke/index.html";
     try {
-      const journeysHtml = await Deno.readTextFile(journeysPath);
-      return html(journeysHtml);
+      const reportHtml = await Deno.readTextFile(reportPath);
+      return html(reportHtml);
     } catch {
-      return html("<html><body><h1>User Journeys Report</h1><p>Report not found at " + journeysPath + "</p></body></html>");
+      return html("<html><body><h1>Smoke-check report</h1><p>Report not found at " + reportPath + "</p></body></html>");
     }
   }
-  // Admin endpoint to update the journeys report (owner secret required).
-  if (req.method === "POST" && path === "/api/journeys") {
+  // Admin endpoint to update the smoke-check report (owner secret required).
+  if (req.method === "POST" && path === "/api/smoke") {
     if (!isOwner(req)) return json({ error: "unauthorized" }, 401);
-    const html = await req.text();
-    const journeysDir = (ctx.dataDir || ".") + "/journeys";
-    const journeysPath = journeysDir + "/index.html";
-    await Deno.mkdir(journeysDir, { recursive: true });
-    await Deno.writeTextFile(journeysPath, html);
-    await audit("journeys.update", {});
-    return json({ ok: true, path: journeysPath });
+    const body = await req.text();
+    const reportDir = (ctx.dataDir || ".") + "/smoke";
+    const reportPath = reportDir + "/index.html";
+    await Deno.mkdir(reportDir, { recursive: true });
+    await Deno.writeTextFile(reportPath, body);
+    await audit("smoke.update", {});
+    return json({ ok: true, path: reportPath });
   }
 
   // The instance's own demo app — open it with the extension, no sign-in.
@@ -314,6 +394,42 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     }
   }
 
+  // --- Google Calendar data grant. It is separate from login and stores a refresh token in
+  // the vault. A signed-in user links it to their existing subject. ---
+  if (path.startsWith("/api/login/google-calendar")) {
+    const g = googleEnv(ctx.env);
+    if (!g) return json({ error: "google login not configured" }, 404);
+    const base = publicUrl || origin;
+    const redirectUri = `${base}/api/login/google-calendar/callback`;
+    const dash = `${base}/dashboard`;
+    if (req.method === "GET" && path === "/api/login/google-calendar") {
+      const subj = subjectOf();
+      if (!subj) return json({ error: "sign in first to connect Google Calendar" }, 401);
+      const rp = url.searchParams.get("return");
+      const ret = rp && rp.startsWith(base) ? rp : dash;
+      return json({ url: googleCalendarAuthUrl(g, newState(ret, subj, "google-calendar"), redirectUri) });
+    }
+    if (req.method === "GET" && path === "/api/login/google-calendar/callback") {
+      const st = consumeState(url.searchParams.get("state") || "");
+      const code = url.searchParams.get("code") || "";
+      if (!st || st.purpose !== "google-calendar" || !code) return html(landingHtml(null, dash, "Google Calendar connection failed (bad state or code)."));
+      try {
+        const grant = await googleCalendarExchange(g, code, redirectUri);
+        const subject = st.linkSubject || `google:${grant.sub}`;
+        await setJar(subject, "google-calendar", "default", {
+          refresh_token: grant.refresh_token,
+          access_token: grant.access_token,
+          access_token_expires_at: String(Date.now() + (grant.expires_in || 3600) * 1000),
+        });
+        await audit("login.google-calendar", { subject });
+        const session = st.linkSubject ? null : await createSession(subject);
+        return html(landingHtml(session, st.ret, "Google Calendar connected."));
+      } catch (e) {
+        return html(landingHtml(null, dash, `Google Calendar connection error: ${(e as Error).message}.`));
+      }
+    }
+  }
+
   // --- Google login (OIDC). Same shape as GitHub; subject = google:<sub>. Client-driven. ---
   if (path.startsWith("/api/login/google")) {
     const g = googleEnv(ctx.env);
@@ -391,7 +507,14 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return json({
       plugins: allPlugins().map((p) => ({
         id: p.id, label: p.label, cookieDomains: p.cookieDomains, account: !!p.account,
-        jar: subj ? jarStatus(subj, p.id) : { present: false, updatedAt: 0, count: 0 },
+        // #12: availability marker, only when the plugin declares it — every other entry
+        // keeps its exact current shape.
+        ...(p.path ? { path: p.path } : {}),
+        ...(p.available === false ? { available: false } : {}),
+        // #133: non-cookie credentials declare tokenSource so the extension can sync them.
+        ...(p.tokenSource ? { tokenSource: p.tokenSource } : {}),
+        // #111: one identity may hold several accounts per plugin — surface them all.
+        jars: subj ? jarsFor(subj, p.id) : [],
       })),
     });
   }
@@ -401,6 +524,48 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return json({ listings: getListings() });
   }
 
+  // --- RFC 0013 (discovery): locator records. A signed HOME pointer per subject DID, or a MOVED
+  // tombstone once the subject migrated to another pod. A stale read on the origin returns 410
+  // + the tombstone so a holder of the old URL can follow `movedTo` (exactly once). Writes are
+  // owner-only: import sets the home record on the destination; export-confirm writes the
+  // tombstone on the origin. Records are Ed25519-signed by this pod's own did:key (in `iss`). ---
+  if (path.startsWith("/api/locator/")) {
+    if (!locator) return json({ error: "locator store not initialized" }, 500);
+    const did = decodeURIComponent(path.slice("/api/locator/".length));
+    if (req.method === "GET" && did) {
+      const { status, body } = locatorGetResponse(locator.get(did));
+      return json(body, status);
+    }
+    if ((req.method === "PUT" || req.method === "POST") && did) {
+      if (!isOwner(req)) return json({ error: "owner only" }, 401);
+      const body = await req.json().catch(() => null) as { home?: string; movedTo?: string; seq?: number } | null;
+      if (body?.home) return json(await locator.setHome(did, body.home, body.seq));
+      if (body?.movedTo) return json(await locator.setMoved(did, body.movedTo, body.seq));
+      return json({ error: "provide {home:<url>} or {movedTo:<url>}" }, 400);
+    }
+  }
+
+  // --- declarative sites (RFC 0012): register a longtail site as data, at runtime, no deploy ---
+  if (path === "/api/sites") {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    if (req.method === "GET") return json({ sites: listSites() });
+    if (req.method === "POST") {
+      const m = await req.json().catch(() => null) as any;
+      try { registerSite(m); } catch (e) { return json({ error: (e as Error).message }, 400); }
+      await persistSite(ctx.dataDir || "", m);
+      await audit("site.register", { id: m.id, scopes: (m.scopes ?? []).map((s: { id: string }) => s.id) });
+      return json({ ok: true, id: m.id, scopes: (m.scopes ?? []).map((s: { id: string }) => s.id) });
+    }
+  }
+  const siteDel = path.match(/^\/api\/sites\/([a-z0-9-]+)$/);
+  if (siteDel && req.method === "DELETE") {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    if (!unregisterSite(siteDel[1])) return json({ error: "not a runtime site" }, 404);
+    await deletePersistedSite(ctx.dataDir || "", siteDel[1]);
+    await audit("site.unregister", { id: siteDel[1] });
+    return json({ ok: true, id: siteDel[1] });
+  }
+
   if (req.method === "POST" && path === "/api/cookies") {
     const subj = subjectOf();
     if (!subj) return json({ error: "unauthorized" }, 401);
@@ -408,9 +573,87 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const plugin = getPlugin(body?.plugin);
     if (!plugin) return json({ error: "unknown plugin" }, 404);
     if (!body?.cookies || typeof body.cookies !== "object") return json({ error: "missing cookies" }, 400);
-    await setJar(subj, plugin.id, body.cookies);
-    await audit("cookies.sync", { subject: subj, plugin: plugin.id, count: Object.keys(body.cookies).length });
-    return json({ ok: true, plugin: plugin.id, count: Object.keys(body.cookies).length });
+    // #111: derive the account from the jar so a second account for the same plugin creates
+    // a second jar instead of overwriting. A plugin without accountId keys under "default".
+    let account: string;
+    try {
+      account = plugin.accountId ? plugin.accountId(body.cookies) : "default";
+    } catch (e) {
+      return json({ error: `cannot derive account: ${(e as Error).message}` }, 400);
+    }
+    await setJar(subj, plugin.id, account, body.cookies);
+    await audit("cookies.sync", { subject: subj, plugin: plugin.id, account, count: Object.keys(body.cookies).length });
+    return json({ ok: true, plugin: plugin.id, account, count: Object.keys(body.cookies).length });
+  }
+
+  // Self-host migration export. The bundle exists only in memory; the response is an envelope
+  // encrypted to the destination key, and only then are the source rows marked for import.
+  if (req.method === "POST" && path === "/api/export") {
+    const acting = subjectOf();
+    // The export ceremony accepts the owner secret or a did:key login challenge. A generic
+    // local userKey session is deliberately insufficient for moving the whole vault.
+    if (!acting || (!isOwner(req) && !session?.subject.startsWith("did:key:"))) return json({ error: "owner secret or did:key ceremony required" }, 401);
+    const body = await req.json().catch(() => null) as { destinationPublicKey?: unknown; destinationX25519PublicKey?: unknown; subject?: unknown } | null;
+    const target = acting === "owner" && typeof body?.subject === "string" ? body.subject : acting;
+    const vault = entriesForExport(target);
+    const grants = tokensForSubject(target);
+    const delegationJwts = grants.filter((grant) => grant.token.split(".").length === 3).map((grant) => grant.token);
+    if (!vault.length && !grants.length) return json({ error: "unknown subject" }, 404);
+    const provenance: Record<string, { capturedVia: string }> = {};
+    for (const entry of vault) {
+      provenance[`${entry.plugin}:${entry.account}`] = { capturedVia: "unknown" };
+    }
+    try {
+      const encrypted = await encryptExport({ version: 0, subject: target, exportedAt: new Date().toISOString(), vault, grants, delegationJwts, provenance }, body?.destinationPublicKey ?? body?.destinationX25519PublicKey);
+      await markMigrating(target);
+      await audit("export", { subject: target, entries: vault.length, grants: grants.length });
+      return json({ ok: true, subject: target, entries: vault.length, export: encrypted });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+  }
+
+  if (req.method === "POST" && path === "/api/import") {
+    if (!session?.subject.startsWith("did:key:")) return json({ error: "did:key ceremony required" }, 401);
+    const body = await req.json().catch(() => null) as { export?: EncryptedExport } | null;
+    const envelope = body?.export || body as unknown as EncryptedExport;
+    const privateKey = ctx.env.MIGRATION_X25519_PRIVATE_KEY;
+    if (!privateKey) return json({ error: "destination migration key is not configured" }, 503);
+    try {
+      const bundle = await decryptMigration(envelope, privateKey);
+      if (bundle.subject !== session.subject) return json({ error: "destination session does not prove bundle subject" }, 403);
+      const podDid = ctx.env.POD_DID || "";
+      const jwkText = ctx.env.POD_SIGNING_PRIVATE_JWK || "";
+      if (!podDid || !jwkText) return json({ error: "destination pod signing identity is not configured" }, 503);
+      let signingJwk: JsonWebKey;
+      try { signingJwk = JSON.parse(jwkText); } catch { return json({ error: "malformed destination pod signing key" }, 503); }
+      const entries = bundle.vault.map((entry) => ({ ...entry, jar: entry.jar }));
+      const imported = await installEntries(bundle.subject, entries);
+      const grants = bundle.grants as unknown as Token[];
+      const grantCount = await importTokens(grants);
+      const importedAt = new Date().toISOString();
+      const receipt = await signReceipt({ subject: bundle.subject, destPod: podDid, importedAt }, signingJwk);
+      await audit("import", { subject: bundle.subject, entries: imported, grants: grantCount });
+      return json({ ok: true, subject: bundle.subject, entries: imported, grants: grantCount, receipt });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
+  }
+
+  if (req.method === "POST" && path === "/api/export/confirm") {
+    const acting = subjectOf();
+    if (!acting) return json({ error: "unauthorized" }, 401);
+    const receipt = await req.json().catch(() => null) as ConfirmReceipt | null;
+    if (!receipt || (acting !== "owner" && receipt.subject !== acting)) return json({ error: "receipt subject mismatch" }, 403);
+    try {
+      if (!await verifyReceipt(receipt)) return json({ error: "invalid destination receipt" }, 400);
+      const deleted = await deleteMigrating(receipt.subject);
+      const revoked = await revokeSubject(receipt.subject);
+      await audit("export.confirm", { subject: receipt.subject, deleted, revoked, destPod: receipt.destPod });
+      return json({ ok: true, subject: receipt.subject, deleted, revoked });
+    } catch (e) {
+      return json({ error: (e as Error).message }, 400);
+    }
   }
 
   // Wipe a jar — your own by default; owner may target any subject via ?subject=.
@@ -419,8 +662,18 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const subj = subjectOf();
     if (!subj) return json({ error: "unauthorized" }, 401);
     const target = (isOwner(req) && url.searchParams.get("subject")) || subj;
-    const ok = await deleteJar(target, delc[1]);
-    await audit("cookies.delete", { subject: target, plugin: delc[1], found: ok });
+    // #111: ?account= targets one account; omitted applies the single/ambiguous rule.
+    const account = url.searchParams.get("account") || undefined;
+    let ok: boolean;
+    try {
+      ok = await deleteJar(target, delc[1], account);
+    } catch (e) {
+      if (e instanceof AmbiguousAccountError) {
+        return json({ error: `multiple accounts synced for ${delc[1]}; pass ?account=<id>`, accounts: e.accounts }, 409);
+      }
+      throw e;
+    }
+    await audit("cookies.delete", { subject: target, plugin: delc[1], account, found: ok });
     return json({ ok, deleted: ok });
   }
 
@@ -434,15 +687,58 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     // for another subject's jar by passing `subject` — e.g. to issue an app a read token for a
     // signed-in user's synced jar without impersonating them.
     const subj = (acting === "owner" && body?.subject) ? String(body.subject) : acting;
-    const t = await mint(body.plugin, subj, body.app, Array.isArray(body?.caps) ? body.caps : undefined);
-    await audit("token.mint", { plugin: t.plugin, subject: t.subject, app: t.app, caps: t.caps });
-    return json({ token: t.token, plugin: t.plugin, subject: t.subject, caps: t.caps ?? null });
+    // #111: optionally bind the token to ONE account's jar. Validate it names an existing
+    // jar for this subject+plugin now (reject unknown up front, not on first read).
+    const account = body?.account !== undefined && body?.account !== null ? String(body.account) : undefined;
+    if (account !== undefined) {
+      const known = jarsFor(subj, body.plugin).map((j) => j.account);
+      if (!known.includes(account)) {
+        return json({ error: `unknown account '${account}' for ${body.plugin}`, accounts: known }, 400);
+      }
+    }
+    const t = await mint(body.plugin, subj, body.app, Array.isArray(body?.caps) ? body.caps : undefined, account);
+    await audit("token.mint", { plugin: t.plugin, subject: t.subject, app: t.app, caps: t.caps, account });
+    return json({ token: t.token, plugin: t.plugin, subject: t.subject, caps: t.caps ?? null, account: account ?? null });
+  }
+  // RFC 7662-style verification for third-party resource servers. Unknown and revoked
+  // tokens deliberately share the same response so this endpoint cannot be used as a
+  // token-probing oracle. The token itself is accepted from the bearer header, not JSON,
+  // so callers cannot accidentally introspect a different credential than the one presented.
+  if (req.method === "POST" && path === "/api/introspect") {
+    const token = authBearer;
+    const t = token ? listTokens().find((candidate) => candidate.token === token && !candidate.revokedAt) : undefined;
+    if (!t) return json({ active: false });
+    return json({ active: true, plugin: t.plugin, subject: t.subject, app: t.app ?? null, caps: t.caps ?? [] });
   }
   if (req.method === "GET" && path === "/api/tokens") {
     const subj = subjectOf();
     if (!subj) return json({ error: "unauthorized" }, 401);
     const all = listTokens();
     return json({ tokens: subj === "owner" ? all : all.filter((t) => t.subject === subj) });
+  }
+  const tighten = path.match(/^\/api\/tokens\/(.+)\/tighten$/);
+  if (req.method === "POST" && tighten) {
+    const acting = subjectOf();
+    if (!acting) return json({ error: "unauthorized" }, 401);
+    const oldToken = decodeURIComponent(tighten[1]);
+    const old = listTokens().find((t) => t.token === oldToken);
+    if (!old || old.revokedAt) return json({ error: "token not found or already revoked" }, 404);
+    if (acting !== "owner" && old.subject !== acting) return json({ error: "token belongs to another subject" }, 403);
+    const body = await req.json().catch(() => null) as { ingredient?: unknown } | null;
+    const ingredient = typeof body?.ingredient === "string" ? scopeIngredient(body.ingredient) : undefined;
+    if (!ingredient) return json({ error: "ingredient must name an enforced scope" }, 400);
+    if (ingredient.plugin !== old.plugin) return json({ error: "ingredient does not match token plugin" }, 400);
+    await revoke(old.token);
+    const tightened = await mint(old.plugin, old.subject ?? "owner", old.app, [ingredient.id]);
+    await audit("token.tighten", {
+      subject: old.subject,
+      app: old.app,
+      plugin: old.plugin,
+      oldToken: old.token.slice(0, 16),
+      token: tightened.token.slice(0, 16),
+      ingredient: ingredient.id,
+    });
+    return json({ token: tightened.token, plugin: tightened.plugin, subject: tightened.subject, app: tightened.app, scope: ingredient.id, label: ingredient.label, revoked: old.token });
   }
   const tok = path.match(/^\/api\/tokens\/(.+)$/);
   if (req.method === "DELETE" && tok) {
@@ -458,6 +754,41 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!subj) return json({ error: "unauthorized" }, 401);
     const all = auditLog();
     return json({ audit: subj === "owner" ? all : all.filter((e) => (e.detail as { subject?: string } | undefined)?.subject === subj) });
+  }
+
+  // #120 — apply the audit retention policy now and report the store size before vs. after
+  // (plus the boot-time prune), so the operator can see retention work on real data.
+  if (req.method === "POST" && path === "/api/audit/prune") {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    return json(await pruneAudit());
+  }
+
+  // #170 — GET /api/jars is the vault's directory of CURRENT jar ownership. Owner-only exactly
+  // like /api/audit: 401 without the owner secret. Returns every (subject, plugin) pair in the
+  // vault with jarStatus()'s fields (updatedAt, count) — never a cookie name or value; this is
+  // a directory, not a read. Consumers must stop reverse-engineering ownership from /api/audit:
+  // that ring buffer is bounded (#120 / PR #147) and evicts old `cookies.sync` entries while the
+  // jar is still fine (the self-inflicted "no z.ai jar synced" board regression). Same source of
+  // truth as allJars() — the scheduler and this endpoint must never disagree.
+  if (req.method === "GET" && path === "/api/jars") {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    return json({ jars: allJarStatuses() });
+  }
+
+  // #132 — make a stranded jar legible. `?subject=<current wallet subject>` classifies every
+  // jar whose subject is NOT the current wallet's as stranded (retired extension wallet /
+  // rotated userKey → new subject → old jars stop refreshing but read as "expired"). Owner-only:
+  // a stranded jar belongs to another subject, so exposing it to a wallet session would cross
+  // the subject isolation line. Owner/subject jar reads for non-owner sessions are tracked
+  // separately (see issue #132). `?plugin=` narrows to one plugin. This is the structured
+  // alternative to mining /api/audit for "the last sync was under a different subject".
+  const stranded = path === "/api/jars/stranded";
+  if (req.method === "GET" && stranded) {
+    if (!isOwner(req)) return json({ error: "owner only" }, 401);
+    const current = url.searchParams.get("subject") || "";
+    if (!current) return json({ error: "?subject=<current wallet subject> required" }, 400);
+    const plugin = url.searchParams.get("plugin") || undefined;
+    return json({ current, stranded: strandedJars(current, plugin) });
   }
 
   // The enforced scope-ingredient ledger, public + read-only (RFC 0004 — closure-can't-drift):
@@ -479,11 +810,15 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
 
   // The 4th self-improvement loop (#72): cluster the gate-allow audit events per app/plugin
   // and PROPOSE named scope ingredients (entries for scopes.ts) capturing exactly what each
-  // app was observed reading. Owner-only: it reads everyone's audit trail. Output is the
-  // decision doc for curating a new ingredient (name/label are drafts; a human finalizes).
+  // app was observed reading. A signed-in user sees proposals associated with their grants;
+  // the owner sees all. Names/labels are drafts; a human finalizes them.
   if (req.method === "GET" && path === "/api/promote") {
-    if (!isOwner(req)) return json({ error: "unauthorized" }, 401);
-    return json({ proposals: proposeIngredients(auditLog()) });
+    const subj = subjectOf();
+    if (!subj) return json({ error: "unauthorized" }, 401);
+    const proposals = proposeIngredients(auditLog());
+    if (subj === "owner") return json({ proposals });
+    const grants = new Set(listTokens().filter((t) => t.subject === subj).map((t) => `${t.app || ""}\0${t.plugin}`));
+    return json({ proposals: proposals.filter((p) => grants.has(`${p.app}\0${p.plugin}`)) });
   }
 
   // Layer-1 listing catalog (read-only; no auth needed for discoverability).
@@ -522,7 +857,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     // token only carries them after the owner approves. scope/attestation feed the RFC 0007
     // routing decision (friction) cached on the request for the approve page to render.
     const caps = Array.isArray(body?.caps) ? body.caps.filter((c: unknown) => typeof c === "string") : undefined;
-    const r = await createConnect(body.plugin, body.subject, body.app, caps, body.scope, body.attestation);
+    const r = await createConnect(body.plugin, body.subject, body.app, caps, body.scope, body.attestation, body?.account !== undefined ? String(body.account) : undefined);
     await audit("connect.request", { plugin: r.plugin, app: r.app, caps: r.caps, requestId: r.requestId, scope: r.scope, friction: r.routeResult?.friction });
     // RFC 0007 §4.1: log eval entry at request time
     await logEval({
@@ -548,6 +883,22 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       const body = await req.json().catch(() => null) as any;
       const approver = subjectOf() ?? (!!ownerSecret && body?.owner_secret === ownerSecret ? "owner" : null);
       if (!approver) return json({ error: "sign in to approve" }, 401);
+      // #111: at approve time the approver's jars are known — validate a named account, or
+      // 409 with the account list when several exist and the request named none. The picker
+      // UI is an oauth3-extension follow-up; the API contract lands here.
+      if (action === "approve") {
+        const pending = getConnect(id);
+        if (pending) {
+          const held = jarsFor(approver, pending.plugin).map((j) => j.account);
+          if (pending.account !== undefined) {
+            if (!held.includes(pending.account)) {
+              return json({ error: `unknown account '${pending.account}' for ${pending.plugin}`, accounts: held }, 400);
+            }
+          } else if (held.length > 1) {
+            return json({ error: `multiple accounts synced for ${pending.plugin}; the connect request must name one (account)`, accounts: held }, 409);
+          }
+        }
+      }
       const r = action === "approve" ? await approveConnect(id, approver) : await denyConnect(id);
       if (!r) return json({ error: "unknown or already-decided request" }, 404);
       await audit(`connect.${action}`, { subject: approver, plugin: r.plugin, app: r.app, requestId: id });
@@ -585,7 +936,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       const body = await req.json().catch(() => null) as any;
       const approver = subjectOf() ?? (!!ownerSecret && body?.owner_secret === ownerSecret ? "owner" : null);
       if (!approver) return json({ error: "sign in to respond" }, 401);
-      const c = action === "approve" ? approveChallenge(id, approver, isOwner(req)) : denyChallenge(id, approver, isOwner(req));
+      const c = action === "approve" ? await approveChallenge(id, approver, isOwner(req)) : denyChallenge(id, approver, isOwner(req));
       if (!c) return json({ error: "unknown or already-decided challenge" }, 404);
       return json({ ok: true, status: c.status, challengeId: c.challengeId });
     }
@@ -596,8 +947,9 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   // browser + /capture-trace, the reification instrument). See twitter-actions.ts. ---
   if (path.startsWith("/api/twitter/debug/")) {
     if (!isOwner(req)) return json({ error: "owner only" }, 401);
-    const jar = getJar("owner", "twitter");
-    if (!jar) return json({ error: "no twitter jar synced" }, 409);
+    const twAcct = url.searchParams.get("account") || undefined;
+    const rj = readJar("owner", "twitter", twAcct); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     const op = path.slice("/api/twitter/debug/".length);
     const body = req.method === "POST" ? (await req.json().catch(() => ({})) as any) : {};
     const way = url.searchParams.get("path") || body.path || "api";
@@ -678,9 +1030,10 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "screenshot", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     const target = url.searchParams.get("url") || plugin.renderUrl ||
       `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
@@ -688,7 +1041,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       const shot = await browserScreenshot(browserSpiUrl, plugin, jar, target, browserSpiSecret);
       // Record token use after successful read (marks first-use as consumed)
       if (t && !isOwner(req)) {
-        recordTokenUse(bearer, plugin.id);
+        await recordTokenUse(bearer, plugin.id);
       }
       await audit("screenshot", { plugin: plugin.id, url: target, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, url: target, ...shot });
@@ -707,9 +1060,10 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verifyCap(bearer, plugin.id, "jar");
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
-    const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     await audit("jar.release", { plugin: plugin.id, subject: subj, count: Object.keys(jar).length, by: t ? (t.app || t.subject || "token") : "owner" });
     return json({ plugin: plugin.id, subject: subj, jar });
   }
@@ -725,15 +1079,16 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "feed", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     const target = url.searchParams.get("url") || plugin.renderUrl ||
       `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
     try {
       const { who, items } = await browserFeed(browserSpiUrl, plugin, jar, target, browserSpiSecret);
-      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       await audit("feed", { plugin: plugin.id, count: items.length, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, who, items });
     } catch (e) {
@@ -745,8 +1100,9 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   if (req.method === "GET" && path === "/api/youtube/debug") {
     if (!isOwner(req)) return json({ error: "owner only" }, 401);
     const subj = url.searchParams.get("subject") || "owner";
-    const jar = getJar(subj, "youtube");
-    if (!jar) return json({ error: `no jar for ${subj}` }, 409);
+    const ytAcct = url.searchParams.get("account") || undefined;
+    const rj = readJar(subj, "youtube", ytAcct); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     const crit = ["SID", "HSID", "SSID", "APISID", "SAPISID", "__Secure-1PSID", "__Secure-3PSID", "__Secure-1PAPISID", "__Secure-3PAPISID", "LOGIN_INFO"];
     const critical = Object.fromEntries(crit.map((c) => [c, c in jar ? (jar[c]?.length ?? 0) : null]));
     // ?egress=1 routes the probe fetch through the shared VPN (so we can A/B the SAME jar
@@ -772,6 +1128,42 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return json({ subject: subj, count: Object.keys(jar).length, egress: { via: viaEgress, proxy: egressProxy() || null }, names: Object.keys(jar), critical, fetch: fetchInfo });
   }
 
+  // --- named reads (server/reads.ts) — ONE route for every read that is REGISTERED rather than
+  // bolted onto the Plugin interface. #144's /api/youtube/liked was the last read to get its own
+  // hand-written block here; it is now a registration in youtube.ts served from this route, so the
+  // next read variant costs a file instead of an interface edit + a route + an attested deploy.
+  // Confinement is unchanged — the same gateRead chokepoint — so a `youtube:liked` token reads
+  // here and NOT /feed, and a `youtube:history` token the reverse. Placed AFTER every bespoke
+  // route, and registerRead() refuses the reserved kinds, so this can neither shadow one nor be
+  // shadowed by one.
+  const namedRead = path.match(/^\/api\/([a-z0-9-]+)\/([a-z0-9-]+)$/);
+  if (req.method === "GET" && namedRead) {
+    const nr = getRead(namedRead[1], namedRead[2]);
+    if (nr) {
+      const plugin = getPlugin(nr.plugin);
+      if (!plugin) return json({ error: "unknown plugin" }, 404);
+      const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+      const t = verify(bearer, plugin.id);
+      if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
+      const denied = await gateRead(t, plugin.id, nr.kind, bearer); if (denied) return denied;
+      const subj = jarSubject(t);
+      if (subj instanceof Response) return subj;
+      const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+      const jar = rj.jar;
+      if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+      try {
+        const data = await nr.run(jar);
+        if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
+        const count = Array.isArray(data) ? data.length : undefined;
+        await audit(nr.kind, { plugin: plugin.id, count, by: t ? (t.app || t.subject || "token") : "owner" });
+        // Response shape preserved from the route this replaces: a list read answers { plugin, items }.
+        return json(Array.isArray(data) ? { plugin: plugin.id, items: data } : { plugin: plugin.id, data });
+      } catch (e) {
+        return json({ error: (e as Error).message }, 502);
+      }
+    }
+  }
+
   // --- live-follow (scoped token or owner): the currently-live item's recent segments
   // + shared-screen frame urls. Same read scope as /items. ---
   const liveM = path.match(/^\/api\/([a-z0-9-]+)\/live$/);
@@ -783,13 +1175,14 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "live", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     try {
       const data = await plugin.live(jar, Number(url.searchParams.get("after") || "0") || 0);
-      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       await audit("live", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, data });
     } catch (e) {
@@ -808,16 +1201,17 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "frame", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     let target: string;
     try { target = atob((url.searchParams.get("u") || "").replace(/-/g, "+").replace(/_/g, "/")); }
     catch { return json({ error: "bad frame url" }, 400); }
     try {
       const { bytes, contentType } = await plugin.fetchFrame(jar, target);
-      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       return new Response(bytes as unknown as BodyInit, { headers: { "Content-Type": contentType, "Access-Control-Allow-Origin": "*" } });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
@@ -834,9 +1228,10 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "items", bearer); if (denied) return denied;
     // A scoped token reads its own subject's jar; the owner secret reads owner's.
-    const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
 
     // Step-up gate now lives in gateRead at the read chokepoint (RFC 0005); first-use is
@@ -847,13 +1242,24 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
         page: url.searchParams.get("page") ? Number(url.searchParams.get("page")) : undefined,
         pageSize: url.searchParams.get("page_size") ? Number(url.searchParams.get("page_size")) : undefined,
       };
-      const data = m[2] ? await plugin.fetchItem(jar, decodeURIComponent(m[2])) : await plugin.listItems(jar, listOpts);
-      // Record token use after successful read (marks first-use as consumed)
-      if (t && !isOwner(req)) {
-        recordTokenUse(bearer, plugin.id);
+      // Response shape (issue #95): a single item (/items/:id) is {plugin, data:<item>};
+      // the list (/items) is {plugin, items:[...], data:items} — `items` matches the
+      // endpoint name + listItems, `data` is a back-compat alias still read by oauth3-sdk,
+      // cli.ts, app-page.ts and otterscope. Prefer `items` in new code.
+      const recordUse = async () => {
+        if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
+      };
+      const by = t ? (t.app || t.subject || "token") : "owner";
+      if (m[2]) {
+        const data = await plugin.fetchItem(jar, decodeURIComponent(m[2]));
+        await recordUse();
+        await audit("read", { plugin: plugin.id, item: m[2], by });
+        return json({ plugin: plugin.id, data });
       }
-      await audit("read", { plugin: plugin.id, item: m[2] || "list", by: t ? (t.app || t.subject || "token") : "owner" });
-      return json({ plugin: plugin.id, data });
+      const items = await plugin.listItems(jar, listOpts);
+      await recordUse();
+      await audit("read", { plugin: plugin.id, item: "list", by });
+      return json({ plugin: plugin.id, items, data: items });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
     }
@@ -872,13 +1278,14 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "account", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     try {
       const data = await plugin.account(jar);
-      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       await audit("account", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, account: data });
     } catch (e) {
@@ -888,24 +1295,26 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
 
   // --- usage/quota (scoped token or owner): provider-side usage numbers for the logged-in
   // account. For zai this is the GLM Coding Plan dashboard (5h/weekly quota %, tokens, per
-  // model) — the read behind the `zai:usage-read` scope ingredient. Same chokepoint as
-  // /items (readKind "quota"), so a usage-scoped token is confined to this and nothing else. ---
-  const quo = path.match(/^\/api\/([a-z0-9-]+)\/quota$/);
-  if (req.method === "GET" && quo) {
-    const plugin = getPlugin(quo[1]);
+  // model); for codex the ChatGPT 5-hour/weekly windows — the read behind the
+  // `*:usage-read` scope ingredients. Same chokepoint as /items (readKind "quota"), so a
+  // usage-scoped token is confined to this and nothing else. ---
+  const quota = path.match(/^\/api\/([a-z0-9-]+)\/quota$/);
+  if (req.method === "GET" && quota) {
+    const plugin = getPlugin(quota[1]);
     if (!plugin) return json({ error: "unknown plugin" }, 404);
     if (!plugin.quota) return json({ error: `${plugin.id} has no quota view` }, 404);
     const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
     const t = verify(bearer, plugin.id);
     if (!isOwner(req) && !t) return json({ error: "unauthorized" }, 401);
     const denied = await gateRead(t, plugin.id, "quota", bearer); if (denied) return denied;
-    const subj = t ? (t.subject ?? "owner") : "owner";
-    const jar = getJar(subj, plugin.id);
-    if (!jar) return json({ error: `no jar synced for ${plugin.id}` }, 409);
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     try {
       const data = await plugin.quota(jar);
-      if (t && !isOwner(req)) recordTokenUse(bearer, plugin.id);
+      if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       await audit("quota", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, data });
     } catch (e) {
@@ -932,11 +1341,12 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       await audit("google-calendar.event.edit.denied", { eventId, reason: "unauthorized" });
       return json({ error: `unauthorized — token must carry ${cap}` }, 401);
     }
-    const subj = t ? (t.subject ?? "owner") : "owner";
+    const subj = jarSubject(t);
+    if (subj instanceof Response) return subj;
     const by = t ? (t.app || t.subject || "token") : "owner";
     const body = await req.json().catch(() => null) as { changes?: unknown } | null;
-    const jar = getJar(subj, "google-calendar");
-    if (!jar) return json({ error: "no jar synced for google-calendar" }, 409);
+    const rj = readJar(subj, "google-calendar", t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
     if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
     await audit("google-calendar.event.edit", { eventId, subject: subj, by });
     if (!plugin.editItem) return json({ error: "plugin does not expose writes" }, 501);
@@ -945,6 +1355,53 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       return json({ ok: true, plugin: "google-calendar", eventId, result });
     } catch (e) {
       return json({ error: (e as Error).message }, 502);
+    }
+  }
+
+  // --- amazon cart-substitute WRITE (#98): edit-on-behalf, attenuated to ONE swap. The owner
+  // may always substitute; a delegated friend may substitute ONE line only if its token carries
+  // the `amazon:cart-substitute` cap (verifyCap — exact string, like write:event:<id>). The cap
+  // grants NO reads (scopeReads(["amazon:cart-substitute"]) is an empty set, so a substitute-
+  // only token is denied at every read chokepoint — it cannot read the cart or order history).
+  // Server-side scope enforcement lives in amazonPlugin.substitute (normalize + price band +
+  // same category + qty bound) which throws SubstituteDeniedError for any shape the cap must
+  // NOT permit (arbitrary add, quantity-bomb, out-of-band/cross-category substitute, unreadable
+  // replacement price); the handler maps denied -> 403 and any other failure -> 502. There is no
+  // checkout/address/payment endpoint, so those are inherently unavailable to this cap. Every
+  // attempt is audited, authorized or not.
+  if (req.method === "POST" && path === "/api/amazon/cart/substitute") {
+    const bearer = (req.headers.get("Authorization") || "").replace(/^Bearer /, "");
+    const cap = "amazon:cart-substitute";
+    const t = verifyCap(bearer, "amazon", cap);
+    if (!isOwner(req) && !t) {
+      await audit("amazon.cart.substitute.denied", { reason: "unauthorized" });
+      return json({ error: `unauthorized — token must carry ${cap}` }, 401);
+    }
+    const subj = t ? (t.subject ?? "owner") : "owner";
+    const by = t ? (t.app || t.subject || "token") : "owner";
+    const body = await req.json().catch(() => null) as Partial<SubstituteOp> | null;
+    const rj = readJar(subj, "amazon", t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const jar = rj.jar;
+    if (!amazonPlugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    await audit("amazon.cart.substitute", { subject: subj, by, op: body });
+    if (!amazonPlugin.substitute) return json({ error: "plugin does not expose cart writes" }, 501);
+    try {
+      const result = await amazonPlugin.substitute(jar, body || {});
+      // #103: audit the reified trajectory — WHICH mutation path ran + how many cart-write ops
+      // the network layer captured (cart.add + cart.remove). The reified `ops` ARE the ground
+      // truth and ride the response body; this audit line is the durable record for review.
+      await audit("amazon.cart.substitute.ok", {
+        subject: subj, by, path: result.path,
+        ops: Array.isArray(result.ops) ? result.ops.length : 0,
+        removed: result.removed?.asin, added: result.added?.asin,
+      });
+      return json({ ok: true, plugin: "amazon", ...result });
+    } catch (e) {
+      const err = e as Error & { code?: string };
+      if (err.code === "denied") {
+        return json({ error: `scope: ${err.message}`, cap }, 403);
+      }
+      return json({ error: err.message }, 502);
     }
   }
 

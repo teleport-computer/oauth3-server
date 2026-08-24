@@ -3,7 +3,8 @@
 // page, grants, and a scoped token is minted and handed back to the app via its
 // requestId. The app never holds the owner secret.
 
-import { mint } from "./tokens.ts";
+import { listTokens, mint, revoke } from "./tokens.ts";
+import { recordTokenUse } from "./stepup.ts";
 import { route } from "./routing.ts";
 import type { RouteResult } from "./types.ts";
 
@@ -17,6 +18,9 @@ export interface ConnectReq {
   scope?: string;
   // RFC 0007 §1.1: verifiability claim (URL of td-0020 evidence bundle)
   attestation?: string;
+  // #111: bind the minted token to ONE account's jar when the approver holds several for
+  // this plugin. Resolved/validated at approve time (the approver's jars are what's read).
+  account?: string;
   status: "pending" | "approved" | "denied";
   token?: string;
   createdAt: number;
@@ -48,6 +52,7 @@ export async function createConnect(
   caps?: string[],
   scope?: string,
   attestation?: string,
+  account?: string,
 ): Promise<ConnectReq> {
   const requestId = `req-${crypto.randomUUID().replace(/-/g, "")}`;
   const routeResult = route(plugin, scope, attestation);
@@ -62,6 +67,7 @@ export async function createConnect(
     status: "pending",
     createdAt: Date.now(),
     routeResult,
+    ...(account ? { account } : {}),
   };
   await persist();
   return reqs[requestId];
@@ -74,9 +80,25 @@ export function getConnect(id: string): ConnectReq | undefined { return reqs[id]
 export async function approveConnect(id: string, approver: string): Promise<ConnectReq | null> {
   const r = reqs[id];
   if (!r || r.status !== "pending") return null;
+  // A reconnect is a replacement grant for the same user/plugin/app tuple. Revoke the
+  // prior live grants before minting the replacement, retaining their rows as an audit trail.
+  const app = r.app ?? "";
+  for (const prior of listTokens()) {
+    if (
+      !prior.revokedAt && prior.plugin === r.plugin && prior.subject === approver &&
+      (prior.app ?? "") === app
+    ) {
+      await revoke(prior.token);
+    }
+  }
   // The minted token carries the requested caps (e.g. write:event:<id>) only after the
   // approver sees them on the consent screen — informed consent for a write capability.
-  const t = await mint(r.plugin, approver, r.app, r.caps);
+  // #111: it also carries the requested account, binding the read to that account's jar.
+  const t = await mint(r.plugin, approver, r.app, r.caps, r.account);
+  // RFC 0005 step-up: an owner-approved connect IS the out-of-band consent. Pre-mark the
+  // freshly minted token as used so its first read does not trip step-up again (the owner
+  // just granted it on the approve screen). oauth3-server#106 acceptance bullet 2.
+  await recordTokenUse(t.token, r.plugin);
   r.status = "approved";
   r.token = t.token;
   await persist();

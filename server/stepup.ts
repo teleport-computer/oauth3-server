@@ -17,14 +17,49 @@ export interface Challenge {
   expiresAt: number;
 }
 
-// In-memory challenge store (local-jar only; no persistence in P0)
+// In-memory challenge store (local-jar only). Pending challenges are deliberately
+// ephemeral: a restart drops any in-flight challenge, which is correct — a read that was
+// never approved simply re-challenges. The DURABLE state is the consented-token set below.
 const challenges = new Map<string, Challenge>();
 
-// Token usage tracking for the "first use" signal (in-memory for P0)
+// Token usage tracking for the "first use" signal. THIS is the durable consent ledger: a
+// token present here has been consented to (used by a successful read, approved via a
+// step-up challenge, or minted through an owner-approved connect) and must never
+// re-challenge. Persisted to the data volume so a core restart does not wipe approvals
+// (oauth3-server#106: the owner was being re-challenged on every redeploy).
 const tokenFirstUse = new Map<string, boolean>();
 
 // TTL: challenge expires after 5 minutes
 const CHALLENGE_TTL = 5 * 60 * 1000;
+
+let file = "";
+
+async function persist(): Promise<void> {
+  if (file) await Deno.writeTextFile(file, JSON.stringify(Object.fromEntries(tokenFirstUse)));
+}
+
+// Load the consented-token set from the data volume on boot, so approvals survive core
+// restarts. Idempotent: safe to call once per process in init().
+export async function initStepup(dir: string): Promise<void> {
+  if (!dir) return;
+  file = `${dir}/stepup.json`;
+  try {
+    const data = JSON.parse(await Deno.readTextFile(file));
+    if (data && typeof data === "object") {
+      for (const k of Object.keys(data)) tokenFirstUse.set(k, true);
+    }
+  } catch (e) {
+    if (!(e instanceof Deno.errors.NotFound)) throw e;
+  }
+}
+
+// TEST-ONLY: drop in-memory state and detach from disk, so a round-trip test can simulate
+// a fresh process restart against the same data dir. Not wired into any production path.
+export function _resetForTest(): void {
+  tokenFirstUse.clear();
+  challenges.clear();
+  file = "";
+}
 
 function generateId(): string {
   return `chal-${crypto.randomUUID().replace(/-/g, "")}`;
@@ -87,15 +122,18 @@ export function getChallenge(id: string): Challenge | null {
   return chal;
 }
 
-// Record that a token has been used (called after successful read)
-export function recordTokenUse(tokenStr: string, plugin: string): void {
+// Record that a token has been used (called after a successful read, after a step-up
+// approval, or at connect-mint). Marks the token as consented in the DURABLE ledger so a
+// later restart does not re-challenge it.
+export async function recordTokenUse(tokenStr: string, plugin: string): Promise<void> {
   const tokenKey = `${plugin}-${tokenStr.slice(0, 16)}`;
   tokenFirstUse.set(tokenKey, true);
+  await persist();
 }
 
 // Approve a challenge. Returns the challenge if found and pending, else null.
 // The approver is the session subject (must not be the app itself).
-export function approveChallenge(id: string, approver: string, approverIsOwner: boolean): Challenge | null {
+export async function approveChallenge(id: string, approver: string, approverIsOwner: boolean): Promise<Challenge | null> {
   const chal = challenges.get(id);
   if (!chal || chal.status !== "pending") return null;
 
@@ -107,7 +145,7 @@ export function approveChallenge(id: string, approver: string, approverIsOwner: 
   // re-challenging. Without this, an approved challenge never lets a read through — the token
   // is stuck challenging forever (score() only checks first-use). chal.token is already the
   // 16-char prefix; recordTokenUse keys on the same slice.
-  recordTokenUse(chal.token, chal.plugin);
+  await recordTokenUse(chal.token, chal.plugin);
   audit("stepup.approved", {
     challengeId: id,
     plugin: chal.plugin,

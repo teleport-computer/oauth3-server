@@ -2,7 +2,10 @@
 // Tests AC1-AC5 from RFC 0003 issue #23: layer-1 listing gate.
 
 import handler from "./handler.ts";
+import { initTokens, mint } from "./tokens.ts";
 import { assertEquals, assertExists } from "jsr:@std/assert@~1.0.0";
+import { getPlugin } from "./plugins/registry.ts";
+import { allJars, deleteJar, setJar } from "./vault.ts";
 
 const TEST_ENV = {
   OAUTH3_OWNER_SECRET: "test-owner-secret",
@@ -180,6 +183,70 @@ Deno.test("handler: audit log records connect.refuse (AC5)", async () => {
   assertEquals(status, 200);
 });
 
+Deno.test("handler: tighten revokes broad token and re-mints enforced ingredient", async () => {
+  const app = `tighten-${crypto.randomUUID()}`;
+  const minted = await ownerReq("POST", "/api/tokens", { plugin: "reddit", app });
+  assertEquals(minted.status, 200);
+  // @ts-ignore
+  const oldToken = minted.json.token;
+  const tightened = await ownerReq(`POST`, `/api/tokens/${encodeURIComponent(oldToken)}/tighten`, { ingredient: "reddit:karma" });
+  assertEquals(tightened.status, 200);
+  // @ts-ignore
+  assertEquals(tightened.json.scope, "reddit:karma");
+  // @ts-ignore
+  assertExists(tightened.json.label);
+  // @ts-ignore
+  assertEquals(tightened.json.revoked, oldToken);
+  // @ts-ignore
+  assertExists(tightened.json.token);
+  const listed = await ownerReq("GET", "/api/tokens");
+  // @ts-ignore
+  const old = listed.json.tokens.find((t: { token: string }) => t.token === oldToken);
+  // @ts-ignore
+  const fresh = listed.json.tokens.find((t: { token: string }) => t.token === tightened.json.token);
+  assertExists(old);
+  assertExists(fresh);
+  // @ts-ignore
+  assertExists(old.revokedAt);
+  // @ts-ignore
+  assertEquals(fresh.caps, ["reddit:karma"]);
+});
+
+Deno.test("handler: POST /api/introspect distinguishes only active from inactive", async () => {
+  const app = `introspect-${crypto.randomUUID()}`;
+  const minted = await ownerReq("POST", "/api/tokens", {
+    plugin: "otter",
+    subject: "u-introspect-subject",
+    app,
+    caps: ["jar"],
+  });
+  assertEquals(minted.status, 200);
+  // @ts-ignore
+  const token = minted.json.token as string;
+
+  const active = await callHandler("POST", "/api/introspect", undefined, {
+    Authorization: `Bearer ${token}`,
+  });
+  assertEquals(active.status, 200);
+  // @ts-ignore
+  assertEquals(active.json, { active: true, plugin: "otter", subject: "u-introspect-subject", app, caps: ["jar"] });
+
+  const garbage = await callHandler("POST", "/api/introspect", undefined, {
+    Authorization: "Bearer tok-otter-garbage",
+  });
+  assertEquals(garbage.status, 200);
+  // @ts-ignore
+  assertEquals(garbage.json, { active: false });
+
+  await ownerReq("DELETE", `/api/tokens/${encodeURIComponent(token)}`);
+  const revoked = await callHandler("POST", "/api/introspect", undefined, {
+    Authorization: `Bearer ${token}`,
+  });
+  assertEquals(revoked.status, 200);
+  // @ts-ignore
+  assertEquals(revoked.json, { active: false });
+});
+
 console.log("All handler tests passed.");
 
 // --- from #34 (staging-oa-33): generic route/auth smoke tests ---
@@ -194,4 +261,173 @@ Deno.test("handler returns signedIn:false for /api/me without auth", async () =>
   if (res.status !== 200) { await res.body?.cancel(); throw new Error(`expected 200, got ${res.status}`); }
   const body = await res.json();
   if (body.signedIn !== false) throw new Error(`expected signedIn:false, got ${body.signedIn}`);
+});
+
+// --- issue #95: GET /api/:plugin/items response shape ---
+// The list is exposed under `items` (preferred — matches the endpoint name + listItems)
+// AND under `data` (back-compat alias still consumed by oauth3-sdk, cli.ts, app-page.ts
+// and otterscope). The single-item path stays {plugin, data:<item>}.
+Deno.test("handler: GET /api/jars 401s without the owner secret (#170)", async () => {
+  const { status, json } = await callHandler("GET", "/api/jars");
+  assertEquals(status, 401);
+  // @ts-ignore
+  assertExists(json.error);
+});
+
+// #170 — /api/jars is a directory of the VAULT (current state), not the audit ring buffer.
+Deno.test("handler: GET /api/jars is the vault directory — same pairs as allJars(), reflects DELETE, independent of /api/audit (#170)", async () => {
+  // Two jars written straight to the vault: no POST /api/cookies, so no cookies.sync ever
+  // enters the audit log for this subject — the "synced so long ago it rolled out of the
+  // ring buffer" case in its sharpest form.
+  await setJar("u-dir-subject", "otter", "default", { session: "x", other: "y" });
+  await setJar("owner", "youtube", "default", { session: "z" });
+
+  const res = await ownerReq("GET", "/api/jars");
+  assertEquals(res.status, 200);
+  const jars = (res.json as { jars: { subject: string; plugin: string; account: string; updatedAt: number; count: number }[] }).jars;
+
+  // jarStatus()'s fields are present per row …
+  const row = jars.find((j) => j.subject === "u-dir-subject" && j.plugin === "otter");
+  assertExists(row);
+  assertEquals(row.account, "default");
+  assertEquals(row.count, 2); // a count of cookies — …
+  assertEquals(typeof row.updatedAt, "number");
+  // … never a cookie NAME or VALUE: this is a directory, not a read.
+  assertEquals(JSON.stringify(jars).includes("session"), false);
+  assertEquals(JSON.stringify(jars).includes("\"x\""), false);
+
+  // AC: an owner reading /api/jars gets the same (subject, plugin) pairs allJars() hands the
+  // scheduler — asserted, not eyeballed.
+  const schedulerPairs = allJars().map((j) => `${j.subject}\0${j.plugin}`).sort();
+  const directoryPairs = jars.map((j) => `${j.subject}\0${j.plugin}`).sort();
+  assertEquals(directoryPairs, schedulerPairs);
+
+  // Reflects the vault, not a log: DELETE a jar → its pair disappears from the response …
+  assertEquals(await deleteJar("owner", "youtube", "default"), true);
+  const after = await ownerReq("GET", "/api/jars");
+  const afterJars = (after.json as { jars: { subject: string; plugin: string }[] }).jars;
+  assertEquals(afterJars.some((j) => j.subject === "owner" && j.plugin === "youtube"), false);
+  // … while the pair whose cookies.sync never hit the audit log (rolled out / never entered)
+  // is still listed.
+  assertEquals(afterJars.some((j) => j.subject === "u-dir-subject" && j.plugin === "otter"), true);
+  const auditRes = await ownerReq("GET", "/api/audit");
+  const auditEntries = (auditRes.json as { audit: { action: string; detail?: Record<string, unknown> }[] }).audit;
+  assertEquals(
+    auditEntries.some((e) => e.action === "cookies.sync" && e.detail?.subject === "u-dir-subject" && e.detail?.plugin === "otter"),
+    false,
+  );
+});
+
+Deno.test("handler: GET /api/:plugin/items returns list under `items` AND `data` (alias) — #95", async () => {
+  const plugin = getPlugin("otter")!;
+  const origLoggedIn = plugin.loggedIn;
+  const origListItems = plugin.listItems;
+  const fakeItems = [
+    { id: "a", title: "Alpha", date: "2026-07-10" },
+    { id: "b", title: "Beta" },
+  ];
+  // Stub the networked collaborator only — the handler's routing/auth/gate/audit/shape
+  // run for real. Restore in finally so other tests are unaffected.
+  plugin.loggedIn = () => true;
+  plugin.listItems = () => Promise.resolve(fakeItems);
+  try {
+    await setJar("owner", "otter", "default", { session: "x" });
+    const { status, json } = await ownerReq("GET", "/api/otter/items");
+    assertEquals(status, 200);
+    const body = json as Record<string, unknown>;
+    assertEquals(body.plugin, "otter");
+    // `items` is the preferred key …
+    assertEquals(Array.isArray(body.items), true);
+    assertEquals(body.items, fakeItems);
+    // … and `data` is a back-compat alias carrying the same payload.
+    assertEquals(Array.isArray(body.data), true);
+    assertEquals(body.data, fakeItems);
+    assertEquals(JSON.stringify(body.items), JSON.stringify(body.data));
+  } finally {
+    plugin.loggedIn = origLoggedIn;
+    plugin.listItems = origListItems;
+  }
+});
+
+Deno.test("handler: GET /api/:plugin/items/:id returns single item under `data` (no `items`) — #95", async () => {
+  const plugin = getPlugin("otter")!;
+  const origLoggedIn = plugin.loggedIn;
+  const origFetchItem = plugin.fetchItem;
+  const one = { id: "a", transcript: "hello world" };
+  plugin.loggedIn = () => true;
+  plugin.fetchItem = () => Promise.resolve(one);
+  try {
+    await setJar("owner", "otter", "default", { session: "x" });
+    const { status, json } = await ownerReq("GET", "/api/otter/items/a");
+    assertEquals(status, 200);
+    const body = json as Record<string, unknown>;
+    assertEquals(body.plugin, "otter");
+    assertEquals(body.data, one);
+    // single-item shape must not leak an `items` key
+    assertEquals("items" in body, false);
+  } finally {
+    plugin.loggedIn = origLoggedIn;
+    plugin.fetchItem = origFetchItem;
+  }
+});
+
+// #131: the read side must REJECT a subjectless token (400), not silently serve the owner's jar.
+// mint() can no longer create one, so we inject a LEGACY subjectless token (as could still sit in
+// a pre-fix vault) straight into the store via initTokens. The /api/:plugin/jar path (verifyCap
+// "jar", no gateRead) isolates jarSubject cleanly.
+Deno.test("handler: #131 subjectless token is rejected, not silently owner", async () => {
+  await callHandler("GET", "/api/health"); // triggers init() so the handler is ready
+  const dir = await Deno.makeTempDir();
+  const legacy = { token: "tok-reddit-legacy", plugin: "reddit", app: "old", caps: ["jar"], createdAt: 1 }; // NO subject
+  await Deno.writeTextFile(`${dir}/tokens.json`, JSON.stringify({ [legacy.token]: legacy }));
+  await initTokens(dir); // load the legacy subjectless token into the shared store
+  const r1 = await callHandler("GET", "/api/reddit/jar", undefined, {
+    Authorization: `Bearer ${legacy.token}`,
+  });
+  assertEquals(r1.status, 400); // was: silently read the owner's (stale) jar
+  // @ts-ignore
+  assertEquals(String(r1.json?.error || "").includes("no subject"), true);
+
+  // A token WITH a subject gets past the check to that subject's own (here absent) jar → 409.
+  const withSubj = await mint("reddit", "u-test-subject", "testapp", ["jar"]);
+  const r2 = await callHandler("GET", "/api/reddit/jar", undefined, {
+    Authorization: `Bearer ${withSubj.token}`,
+  });
+  assertEquals(r2.status, 409);
+});
+
+// #120 — audit retention prune endpoint is owner-only and reports store sizes.
+Deno.test("handler: POST /api/audit/prune is owner-only", async () => {
+  const noAuth = await callHandler("POST", "/api/audit/prune");
+  assertEquals(noAuth.status, 401); // a non-owner wallet session must not prune/report
+  const ok = await ownerReq("POST", "/api/audit/prune");
+  assertEquals(ok.status, 200);
+  // @ts-ignore
+  assertEquals(typeof ok.json?.removed, "number");
+  // @ts-ignore
+  assertEquals((ok.json?.policy?.maxEntries ?? 0) > 0, true);
+});
+
+// #55 (RFC 0008): the demo app goes through the SDK connect() port — it must not
+// branch on the injected provider, and it must surface the web-handshake approve URL.
+Deno.test("app page: SDK connect contract, no provider branch (#55)", async () => {
+  const req = new Request("http://localhost:8000/app?plugin=otter", { method: "GET" });
+  const res = await handler(req, TEST_CTX);
+  const body = await res.text();
+  assertEquals(res.status, 200);
+  assertEquals(
+    body.includes("window.oauth3"),
+    false,
+    "/app must not reference the injected provider directly (RFC 0008)",
+  );
+  assertEquals(
+    body.includes("onApproveUrl"),
+    true,
+    "/app must render the approve link via the SDK web handshake",
+  );
+  assertEquals(
+    body.includes("globalThis.oauth3"),
+    true,
+    "provider preference lives inside the SDK connect() port, not the app",
+  );
 });

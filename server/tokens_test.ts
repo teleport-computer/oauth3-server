@@ -5,7 +5,7 @@
 // not prefix-bleed ("write:event:AB" ≠ "write:event:A"). Plus an in-process check that
 // the POST /api/google-calendar/event/:id endpoint enforces the same at the handler.
 
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals, assertRejects } from "jsr:@std/assert";
 import { mint, revoke, verify, verifyCap } from "./tokens.ts";
 import handler from "./handler.ts";
 
@@ -68,4 +68,12 @@ Deno.test("handler POST /api/google-calendar/event/:id — cap gating", async ()
   assertEquals((await post(capB.token)).status, 401); // wrong event
   assertEquals((await post(readOnly.token)).status, 401); // read-only token
   assertEquals((await post(null)).status, 401); // no credentials
+});
+
+// #131: mint refuses to create a subjectless token (empty string rejected at runtime; the
+// omitted-argument case is a compile error since `subject` is a required parameter).
+Deno.test("mint: subjectless token is rejected at mint time", async () => {
+  await assertRejects(() => mint(PLUGIN, "", "app"), Error, "subject is required");
+  const ok = await mint(PLUGIN, "u-real", "app"); // a real subject still mints
+  assertEquals(ok.subject, "u-real");
 });

@@ -1,0 +1,31 @@
+# Tier 1 HTTP transcript — oauth3-server #81 (/journeys -> /smoke rename)
+# Commit under test: e954a6cd36d352d73e44eefbed3c63cb72295d2e (GIT_SHA pinned below)
+# Transport: real HTTP over localhost (deno.serve + fetch), the actual server/handler.ts
+
+## 0) GET /_api/version  (version pin == this PR's commit)
+   HTTP 200  {"service":"oauth3-server","commit":"e954a6c"}
+
+## 1) POST /api/smoke  (owner secret) — upload a labeled sample report
+   HTTP 200  {"ok":true,"path":"/tmp/oa-81-data/smoke/index.html"}
+
+## 2) GET /smoke  — serves the uploaded report
+   HTTP 200  <html><body><h1>Smoke-check report (S1-S7)</h1><p>not live data — Tier 1 transcript sample</p></body></html>
+
+## 3) GET /smoke/ (trailing-slash variant also matches)
+   HTTP 200
+
+## 4) GET /journeys  — OLD path REMOVED (expect 404)
+   HTTP 404
+
+## 5) POST /api/journeys  — OLD upload path REMOVED (expect 404)
+   HTTP 404
+
+## 6) POST /api/smoke WITHOUT owner secret — gate intact (expect 401)
+   HTTP 401  {"error":"unauthorized"}
+
+## 7) GET /_api/version  (re-confirm pin)
+   HTTP 200  {"service":"oauth3-server","commit":"e954a6c"}
+
+## 8) Filesystem proof
+   data/smoke/index.html exists: yes
+   data/journeys/ exists:        no (correct — renamed)
