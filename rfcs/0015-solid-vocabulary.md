@@ -61,8 +61,9 @@ in conversation — and use **host** in text that has to be precise.
 | the operator | **host owner** (informally: the host) | the person who runs the node and chooses which apps run on it | `OWNER_SECRET`, `isOwner()`, `TEE_DAEMON_TOKEN` |
 | the node | **host** | the attested CVM serving apps | "pod", `pod.dstack.soc1024.com` |
 | the deployed unit | **app** | code the host owner installed, with its own container, source pin and quote | `project` (the dataclass, `/_api/projects`) |
-| the person | **agent** (informally: user) | whoever signs in and delegates; identified by a did:key | `subject` (`u-…`), `identity.ts` |
-| the person's data | **storage** | that agent's jars and records, wherever they live | vault keys `${subject}:${plugin}:${account}`, TinyCloud |
+| the delegator | **subject** (informally: user) | the person who signs in and delegates; identified by a did:key | `subject` (`u-…`), `identity.ts` |
+| the delegate | **agent** | software acting on a subject's behalf under a scoped token — what the word already means in this stack | swarm workers, `hermes-agent`, `AGENTS.md` |
+| the subject's data | **storage** | that subject's jars and records, wherever they live | vault keys `${subject}:${plugin}:${account}`, TinyCloud |
 
 **An app is not an agent and an agent is not an app.** Agents are cross-cutting: one agent
 delegates to many apps, and the same jar is read by several. This is the distinction
@@ -70,13 +71,25 @@ delegates to many apps, and the same jar is read by several. This is the distinc
 
 "Tenant" is not in the table on purpose. It is cloud-infra language for *the party you are
 isolating*, which in our stack is ambiguous exactly where we need precision: gVisor isolates
-apps, `gateRead` isolates agents. Use the specific word.
+apps, `gateRead` isolates subjects. Use the specific word.
+
+**And we deliberately do NOT adopt Solid's `agent` for the person.** Their definition is "a
+person, social entity, **or software** identified by a URI" — software counts. That is harmless
+in Solid, where an app is a dumb client fetching documents, and fatal here, where the entire
+point is that a person delegates a scoped capability to software acting on their behalf. A word
+that covers both parties cannot name either side of the relationship this system exists to
+mediate; "the agent delegates to the agent" would be well-formed. It is also already taken: 289
+uses across our repos, all meaning an AI worker (`AGENTS.md`, the swarm's lanes, `hermes-agent`).
+
+So `agent` keeps its local meaning — **the delegate** — and the person is the `subject`, which is
+what `vault.ts`, `identity.ts` and OIDC's `sub` already call them. The three roles are then the
+three parties in one delegation, which is the relationship RFC 0003 is about.
 
 ## 4. What we already have, in these terms
 
 | Solid | ours | file |
 |---|---|---|
-| WebID denotes an agent | **did:key subject** — "you prove who you are by signing a server-issued challenge with your key… The session subject IS your did:key" | `identity.ts` |
+| WebID denotes an agent (person *or software*) | **did:key subject** — the person only; software acting for them is an `agent` holding a scoped token | — "you prove who you are by signing a server-issued challenge with your key… The session subject IS your did:key" | `identity.ts` |
 | Solid-OIDC + DPoP proof-of-possession | the same primitive without an issuer: sign a challenge with a key you chose | `identity.ts`, `tokens.ts` |
 | a *user-controlled OP* | did:key needs no OP at all — the identifier is the key | `identity.ts` |
 | WAC access modes | scope ingredients + `gateRead` readKinds; `maxScope` read/raw; structured caps (`write:event:<id>`, `amazon:cart-substitute`) | `scopes.ts`, `handler.ts` |
@@ -133,10 +146,12 @@ public trust surface, where the layer confusion actually costs a reader somethin
 
 1. `docs/architecture.md` states the five terms in §3 and the app/agent distinction, once, near
    the top.
-2. The public trust surface (the console, `docs/auth.md`, the approve screen) uses **agent** or
-   **user** for people and **app** for apps, with no "tenant".
+2. The public trust surface (the console, `docs/auth.md`, the approve screen) uses **subject** or
+   **user** for people, **app** for apps, and **agent** only for software acting on a subject's
+   behalf — with no "tenant".
 3. §5's two consequences are each filed as their own issue, so they do not live only in an RFC.
-4. `vault.ts`'s "Per-tenant" comment reads "Per-agent", matching the layer it is actually about.
+4. `vault.ts`'s "Per-tenant" comment reads "Per-subject", matching both the layer and the key it
+   is actually about (`${subject}:${plugin}:${account}`).
 
 ## References
 
