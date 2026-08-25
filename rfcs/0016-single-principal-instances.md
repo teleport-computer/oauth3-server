@@ -95,17 +95,46 @@ That is a substrate gap, not a naming accident (see §5).
 
 Guest works today. Peer does not generalise, and the reason is specific rather than vague:
 
-**Delegations do not survive crossing an instance boundary.** The tenant-exit experiment
-(2026-08-14) moved a subject to a new host with only their keys and found that *data survives
-and grants do not* — delegation parents are node-local and the wire format is not
-self-contained. `export.ts`/`migration.ts` move jars; nothing moves capabilities.
+**Delegations do not survive crossing an instance boundary — because of what they are addressed
+to, not because of how they are carried.** The tenant-exit experiment (2026-08-14) moved a
+subject to a new host with only their keys and found that *data survives and grants do not*.
+The mechanism is exact:
 
-A peer-to-peer SDK is precisely a system in which grants must travel: instance A's principal
-grants something to instance B's principal, and B must be able to exercise it against A, and
-carry it if either of them moves. So the single missing primitive is a **self-contained,
-verifiable delegation** — one whose whole parent chain travels with it, verifiable by a party
-who was not present when it was issued. RFC 0011's did:key/UCAN work is the obvious substrate;
-`ucan.ts` exists; the chain does not travel.
+- `ucan.ts` requires `aud` to be a bare `did:key` — a grant names a KEY.
+- `deploy.py` derives an app's key from `GetKey("/tee-daemon/projects/<name>")` — i.e. from the
+  NODE's KMS root plus the project name.
+
+So the audience is `did:key(app_pubkey)` where `app_pubkey = f(node KMS root, project name)`.
+Nothing about the delegation FORMAT is node-local; the audience VALUE is. Move the app and it
+derives a different key at the same path, so every grant addressed to the old one is scrap.
+
+**A delegation between a subject and an app need not name a node at all.** The grant is about
+which code may act on the subject's data; the node is an implementation detail of where that code
+happens to be running this week. Address the grant to the app's **code identity** — the
+measurement RFC 0027's binding quote already produces — and portability stops being machinery to
+build and becomes the absence of a mistake.
+
+The one thing that must come with it: a code identity is not a secret, so the grant cannot be
+authenticated by key possession alone. The holder must PROVE it is running that code. That is
+exactly what the per-app binding quote does (`app_pubkey` bound to `tree_hash` in a TDX quote),
+so the exercise path becomes:
+
+1. `aud` names a code identity (or, per td-0024's `allowedCodeIdentities`, a SET of them — which
+   is what keeps upgrades from invalidating every outstanding grant).
+2. The instance presents a binding quote proving `app_pubkey ↔ tree_hash` on a real TEE.
+3. The verifier checks the quote, checks the measurement is admitted by `aud`, and treats the
+   presented pubkey as this instance's ephemeral session key.
+
+The key becomes per-node and disposable. The grant becomes per-code and portable. Every piece
+exists already — `ucan.ts` for the envelope, RFC 0027 for the binding quote, td-0024 for the
+admission set; what is missing is that they have never been wired together in that order.
+
+**This is what makes node owners replaceable.** Solid commoditises hosting providers by letting
+the subject carry their data away. That option is not available to us: a live cookie jar cannot
+be carried, which is the reason this system exists. Binding grants to code rather than to hosts
+gets the same property by the other route — the host was never named, so leaving costs nothing
+and a host owner competes on price, uptime and jurisdiction rather than on lock-in. It is the
+stronger version of the argument precisely in the case where possession is impossible.
 
 Second, smaller gap: **the substrate has no concept of an instance.** One app deployed four
 times is four unrelated projects, sharing no identity, no discovery and no way to enumerate
