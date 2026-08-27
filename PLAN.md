@@ -1,40 +1,33 @@
-# PLAN — issue #19: document the otterscope demo + the window.oauth3.connect provider flow
+# PLAN — issue #52: failed/attempted credential reads leave no trace
 
-Acceptance checkboxes (from the issue):
+Base: `origin/staging` (bc07af6). Branch: `staging-oa-52`.
 
-- [x] `README.md` links the live `otterscope` demo and the SDK documentation.
-- [x] The linked documentation shows `window.oauth3.connect({node, plugin})` returning a scoped
-      token and the app consuming `/oauth3/api/:plugin/items` without receiving a cookie.
-- [x] A reader can follow the documented provider flow from connect request through token-backed
-      read, with the request/response shapes matching the implemented API docs.
+## Diagnosis (verified against current code — line numbers moved since filing)
+`gateRead` writes the `gate` allow row (attempt), but every read route returns without a row on
+failure: `readJar` !ok → 409 "no jar synced", `!plugin.loggedIn(jar)` → 409 "jar present but not
+logged in", catch → 502. Only successes audit (`read`/`feed`/`account`/`quota`/`live`/`screenshot`/
+`nr.kind`; `frame` audits nothing even on success). 8 gateRead routes total.
 
-## Steps
+## Changes
+- [x] Add `auditReadOutcome(t, plugin, readKind, outcome, message?)` next to `gateRead` — writes
+      one `read.outcome` row `{plugin, readKind, outcome, message?, by}` (same `by` attribution
+      as existing rows).
+- [x] Instrument all 8 chokepoint routes' three failure exits: `no-jar`, `not-logged-in`,
+      `error` (with the thrown message).
+- [x] `frame` success now audits `frame` (it produced zero rows even on success).
+- [x] items list success row carries `count` (ok outcome = "ok (with count)" per Acceptance).
+- [x] Tests in `server/handler_test.ts`: no-jar 409 → exactly one `read.outcome` row (by=app);
+      not-logged-in 409 → row; 502 → row with message; success → NO `read.outcome` row and the
+      `gate` row unchanged.
 
-- [x] Verify the facts before writing (done — code-verified, see notes below).
-- [x] Write `docs/provider-flow.md`: live otterscope demo link + the provider flow
-      (connect → scoped token → token-backed read), request/response shapes matching
-      `docs/http-api.md` and `server/handler.ts`/`server/connect.ts`.
-- [x] Link it from `README.md` (live demo URL + SDK docs link + the new page).
-- [x] Link it from the SDK docs (`oauth3-sdk` README) — the issue body's second link target.
-- [x] Link/example checks: live demo URL 200; linked files exist; README contains both links.
-- [x] `deno check server/main.ts` + `deno test` green (Tier 0: no behavior change).
-- [x] PR to `staging`, swap issue label ready → in-review, comment.
+## Acceptance → evidence
+- [ ] Three reads on deployed staging as u-swarm via connect→approve (demo-app): ok (reddit
+      /items 200), no-jar (codex or google-calendar /items 409), error (nytimes /items 502 — NYT
+      datadome blocks server-side replay, a real existing failure).
+- [ ] `GET /oauth3/api/audit` transcript with the three outcome rows + pinned `/_api/version`.
+- Tier 1.
 
-## Verified facts (2026-08-20, staging HEAD d62cc6c)
-
-- Live demo serves: `https://pod.dstack.soc1024.com/otterscope/` → 200.
-- Instance base on the shared pod is `https://pod.dstack.soc1024.com/oauth3`
-  (`/oauth3/api/plugins` 200; root `/api/plugins` 404).
-- otterscope (webhost-apps `otterscope/server.ts`) calls
-  `window.oauth3.connect({node: location.origin+"/oauth3", plugin:"otter", app:"otterscope"})`
-  and reads `${node}/api/otter/items` with `Authorization: Bearer <token>`; token persisted in
-  localStorage; no cookie crosses to the app.
-- Extension leg (`oauth3-extension` provider-inject/bridge + `providerConnect` in
-  service-worker.js): approval dialog → `GET /api/plugins` → per-site consent check →
-  `POST /api/cookies` (transport) → `POST /api/connect` → `POST /api/connect/:id/approve`
-  (wallet session) → `GET /api/connect/:id` → `{status:"approved", token}` relayed to the page.
-- Connect-approved tokens are step-up-exempt (`server/connect.ts` `recordTokenUse` at mint;
-  landed in 19fb35d / #107), so the token's first `/items` read is a plain 200. Owner-minted
-  tokens (`POST /api/tokens`) still get one `409 challenge_pending` first read.
-- Read shapes (`server/handler.ts` ~1213): list `200 {plugin, items:[…], data:items}`; single
-  `200 {plugin, data:<item>}`; errors 401/404/409/502 per `docs/http-api.md`.
+## Verify
+- [ ] `deno check server/main.ts` clean
+- [ ] `deno test` green → ~/paseo-batch/out/oa-52/test.log
+- [ ] deploy via `bash ~/paseo-batch/deploy-staging-oauth3.sh staging-oa-52`, collect transcript
