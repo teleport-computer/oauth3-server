@@ -39,7 +39,7 @@ import { allPlugins, getPlugin } from "./plugins/registry.ts";
 import { getRead } from "./reads.ts";
 import { configureEgress, egressFetch, egressProxy } from "./egress.ts";
 import { allJarStatuses, AmbiguousAccountError, deleteJar, deleteMigrating, entriesForExport, getJar, initVault, installEntries, jarsFor, markMigrating, setJar, strandedJars } from "./vault.ts";
-import { importTokens, initTokens, listTokens, mint, revoke, revokeSubject, tokensForSubject, type Token, verify, verifyCap } from "./tokens.ts";
+import { importTokens, initTokens, listTokens, mint, revoke, revokeSubject, tokensForSubject, type Token, verify, verifyCap, verifiedCaps } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit, pruneAudit } from "./audit.ts";
 import { formatAuditDecision, gate, Scope, STATIC_LISTING } from "./listing.ts";
@@ -102,7 +102,7 @@ async function init(env: Record<string, string>, dataDir: string) {
       return "default";
     }
   });
-  await initTokens(dataDir);
+  await initTokens(dataDir, env.SEAL_KEY ?? env.OAUTH3_SEAL_KEY);
   await initConnect(dataDir);
   await initStepup(dataDir);
   await initAudit(dataDir);
@@ -990,10 +990,16 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
   // completes stays hot — the app must answer the challenge AND get a clean read to clear it.
   async function gateRead(t: Token | null, pluginId: string, readKind: string, bearer: string): Promise<Response | null> {
     const by = t ? (t.app || t.subject || "token") : "owner";
-    const allowed = scopeReads(t?.caps);
+    let allowed: Set<string> | null;
+    try {
+      allowed = t ? scopeReads(await verifiedCaps(t)) : null;
+    } catch (e) {
+      await audit("gate", { plugin: pluginId, readKind, decision: "deny", by, reason: (e as Error).message });
+      return json({ error: "token delegation invalid" }, 403);
+    }
     if (allowed && !allowed.has(readKind)) {
       await audit("gate", { plugin: pluginId, readKind, decision: "deny", by });
-      return json({ error: `scope: this token may read ${[...allowed].join("+")} only, not ${readKind}`, scope: scopeLabel(t?.caps) }, 403);
+      return json({ error: `scope: this token may read ${[...allowed].join("+")} only, not ${readKind}`, scope: scopeLabel(await verifiedCaps(t!)) }, 403);
     }
     if (t && !isOwner(req)) {
       const scored = score(bearer, pluginId, readKind, t.app);
