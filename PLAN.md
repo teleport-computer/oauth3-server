@@ -21,13 +21,16 @@ logged in", catch → 502. Only successes audit (`read`/`feed`/`account`/`quota`
       `gate` row unchanged.
 
 ## Acceptance → evidence
-- [ ] Three reads on deployed staging as u-swarm via connect→approve (demo-app): ok (reddit
-      /items 200), no-jar (codex or google-calendar /items 409), error (nytimes /items 502 — NYT
-      datadome blocks server-side replay, a real existing failure).
-- [ ] `GET /oauth3/api/audit` transcript with the three outcome rows + pinned `/_api/version`.
+- [x] Three reads on deployed staging as u-swarm via connect→approve (demo-app): ok (reddit
+      /items 200, count 51), no-jar (reddit /items?account=no-such-account 409 — every
+      demo-app-listed plugin has a live jar, so the no-jar branch is hit via an unresolvable
+      account; same `readJar !ok` code path), error (nytimes /items 502 — NYT datadome blocks
+      server-side replay, a real pre-existing failure).
+- [x] `GET /oauth3/api/audit` transcript with the three outcome rows + `/_api/version` ==
+      af843df — .evidence/issue-52/transcript.md.
 - Tier 1.
 
 ## Verify
-- [ ] `deno check server/main.ts` clean
-- [ ] `deno test` green → ~/paseo-batch/out/oa-52/test.log
-- [ ] deploy via `bash ~/paseo-batch/deploy-staging-oauth3.sh staging-oa-52`, collect transcript
+- [x] `deno check server/main.ts` clean
+- [x] `deno test` green (203 passed) → ~/paseo-batch/out/oa-52/test.log
+- [x] deploy via `bash ~/paseo-batch/deploy-staging-oauth3.sh staging-oa-52`, transcript collected
