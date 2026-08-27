@@ -992,14 +992,15 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const by = t ? (t.app || t.subject || "token") : "owner";
     let allowed: Set<string> | null;
     try {
-      allowed = t ? scopeReads(await verifiedCaps(t)) : null;
+      const caps = t ? await verifiedCaps(t) : undefined;
+      allowed = scopeReads(caps);
+      if (allowed && !allowed.has(readKind)) {
+        await audit("gate", { plugin: pluginId, readKind, decision: "deny", by });
+        return json({ error: `scope: this token may read ${[...allowed].join("+")} only, not ${readKind}`, scope: scopeLabel(caps) }, 403);
+      }
     } catch (e) {
       await audit("gate", { plugin: pluginId, readKind, decision: "deny", by, reason: (e as Error).message });
       return json({ error: "token delegation invalid" }, 403);
-    }
-    if (allowed && !allowed.has(readKind)) {
-      await audit("gate", { plugin: pluginId, readKind, decision: "deny", by });
-      return json({ error: `scope: this token may read ${[...allowed].join("+")} only, not ${readKind}`, scope: scopeLabel(await verifiedCaps(t!)) }, 403);
     }
     if (t && !isOwner(req)) {
       const scored = score(bearer, pluginId, readKind, t.app);

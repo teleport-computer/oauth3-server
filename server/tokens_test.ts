@@ -97,3 +97,9 @@ Deno.test("grant delegation: att derives the existing scope set and tampering fa
   }), { env: { OWNER_SECRET: "test-owner-secret" }, dataDir: "" });
   assertEquals(response.status, 403);
 });
+
+Deno.test("grant delegation: generated audience is persisted when app has no did:key", async () => {
+  const t = await mint("reddit", "u-audience-test", "plain-app");
+  assert(t.delegationAudience?.startsWith("did:key:z"));
+  assertEquals(decode(t.delegation!).aud, t.delegationAudience);
+});

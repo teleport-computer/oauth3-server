@@ -14,6 +14,7 @@ export interface Token {
   account?: string; // #111: bind the token to ONE account's jar when a subject holds several for this plugin
   delegation?: string;
   delegationCid?: string;
+  delegationAudience?: string;
   createdAt: number;
   revokedAt?: number;
 }
@@ -52,8 +53,13 @@ async function persist(): Promise<void> {
   if (file) await Deno.writeTextFile(file, JSON.stringify({ tokens, revokedCids }));
 }
 
-export async function initTokens(dir: string, sealKey = "dev-only-seal-key"): Promise<void> {
-  pod = await derivePod(sealKey);
+export async function initTokens(dir: string, sealKey?: string): Promise<void> {
+  if (dir) {
+    if (!sealKey) throw new Error("SEAL_KEY required for token delegations");
+    pod = await derivePod(sealKey);
+  } else if (!pod) {
+    pod = await generateKeypair();
+  }
   if (!dir) return;
   file = `${dir}/tokens.json`;
   try {
@@ -70,12 +76,24 @@ export async function initTokens(dir: string, sealKey = "dev-only-seal-key"): Pr
 export async function mint(plugin: string, subject: string, app?: string, caps?: string[], account?: string): Promise<Token> {
   if (!subject) throw new Error("mint: subject is required (a token must be bound to a subject)")
   const token = `tok-${plugin}-${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
-  const issuer = pod ?? await derivePod("dev-only-seal-key");
+  if (!pod) pod = await generateKeypair();
+  const issuer = pod;
   const audience = app?.startsWith("did:key:") ? app : (await generateKeypair()).did;
   const resource = `tinycloud:key:${issuer.did.slice("did:key:".length)}:oauth3/${encodeURIComponent(subject)}/${plugin}`;
   const capabilities = (caps ?? []).map((cap) => ({ with: resource, can: `${plugin}/${cap}` }));
   const delegation = await mintDelegation({ issuer, audience, capabilities, expiresInSec: 365 * 24 * 60 * 60 });
-  const t: Token = { token, plugin, subject, app, ...(caps?.length ? { caps } : {}), ...(account ? { account } : {}), delegation, delegationCid: cidForToken(delegation), createdAt: Date.now() };
+  const t: Token = {
+    token,
+    plugin,
+    subject,
+    app,
+    ...(caps?.length ? { caps } : {}),
+    ...(account ? { account } : {}),
+    delegation,
+    delegationCid: cidForToken(delegation),
+    delegationAudience: audience,
+    createdAt: Date.now(),
+  };
   tokens[token] = t;
   await persist();
   return t;

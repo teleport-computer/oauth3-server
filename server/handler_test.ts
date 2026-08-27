@@ -380,7 +380,7 @@ Deno.test("handler: #131 subjectless token is rejected, not silently owner", asy
   const dir = await Deno.makeTempDir();
   const legacy = { token: "tok-reddit-legacy", plugin: "reddit", app: "old", caps: ["jar"], createdAt: 1 }; // NO subject
   await Deno.writeTextFile(`${dir}/tokens.json`, JSON.stringify({ [legacy.token]: legacy }));
-  await initTokens(dir); // load the legacy subjectless token into the shared store
+  await initTokens(dir, "test-seal-key-32-bytes-1234567890ab"); // load the legacy subjectless token into the shared store
   const r1 = await callHandler("GET", "/api/reddit/jar", undefined, {
     Authorization: `Bearer ${legacy.token}`,
   });
