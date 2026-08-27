@@ -252,6 +252,31 @@ Deno.test("handler: POST /api/introspect distinguishes only active from inactive
 console.log("All handler tests passed.");
 
 // --- from #34 (staging-oa-33): generic route/auth smoke tests ---
+// #67: the landing keeps the signed-out CTA (AC2) and ships the one-click dashboard swap
+// (AC1/AC3) — session validity is decided client-side via api/me, so the signed-in rendering
+// is verified in the browser (Tier 2 evidence), not here.
+Deno.test("home page: signed-out CTA + dashboard swap script (#67)", async () => {
+  const req = new Request("http://localhost:8000/", { method: "GET" });
+  const res = await handler(req, TEST_CTX);
+  const body = await res.text();
+  assertEquals(res.status, 200);
+  assertEquals(
+    body.includes('<a class=btn id=cta href="login">Sign in to this pod</a>'),
+    true,
+    "/ must keep the sign-in CTA for anonymous visitors (AC2)",
+  );
+  assertEquals(
+    body.includes("Go to your dashboard"),
+    true,
+    "/ must ship the signed-in CTA swap (AC1)",
+  );
+  assertEquals(
+    body.includes("oauth3_session") && body.includes("api/me"),
+    true,
+    "the swap must validate the localStorage session, not trust it",
+  );
+});
+
 Deno.test("handler returns 404 for unknown routes", async () => {
   const res = await handler(new Request("http://localhost/api/unknown-route"), { env: {}, dataDir: "" });
   await res.body?.cancel();
