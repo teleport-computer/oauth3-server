@@ -1031,6 +1031,27 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     return null;
   }
 
+  // #52: reads audited only their success — the early returns (no jar / not logged in) and
+  // the 502 catch left failed credential USE with no trace, so the trail could not show
+  // whether an app's reads were working, failing, or not happening. One row per FAILED
+  // outcome; successful reads keep their existing rows, and the `gate` row above stays the
+  // attempt record.
+  async function auditReadOutcome(
+    t: Token | null,
+    plugin: string,
+    readKind: string,
+    outcome: "no-jar" | "not-logged-in" | "error",
+    message?: string,
+  ): Promise<void> {
+    await audit("read.outcome", {
+      plugin,
+      readKind,
+      outcome,
+      ...(message ? { message } : {}),
+      by: t ? (t.app || t.subject || "token") : "owner",
+    });
+  }
+
   // --- logged-in render via the Browser SPI (same vault jar as /items) ---
   const sc = path.match(/^\/api\/([a-z0-9-]+)\/screenshot$/);
   if (req.method === "GET" && sc) {
@@ -1042,9 +1063,9 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const denied = await gateRead(t, plugin.id, "screenshot", bearer); if (denied) return denied;
     const subj = jarSubject(t);
     if (subj instanceof Response) return subj;
-    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) { await auditReadOutcome(t, plugin.id, "screenshot", "no-jar"); return rj.resp; }
     const jar = rj.jar;
-    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    if (!plugin.loggedIn(jar)) { await auditReadOutcome(t, plugin.id, "screenshot", "not-logged-in"); return json({ error: "jar present but not logged in" }, 409); }
     const target = url.searchParams.get("url") || plugin.renderUrl ||
       `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
     try {
@@ -1056,6 +1077,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       await audit("screenshot", { plugin: plugin.id, url: target, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, url: target, ...shot });
     } catch (e) {
+      await auditReadOutcome(t, plugin.id, "screenshot", "error", (e as Error).message);
       return json({ error: (e as Error).message }, 502);
     }
   }
@@ -1091,9 +1113,9 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const denied = await gateRead(t, plugin.id, "feed", bearer); if (denied) return denied;
     const subj = jarSubject(t);
     if (subj instanceof Response) return subj;
-    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) { await auditReadOutcome(t, plugin.id, "feed", "no-jar"); return rj.resp; }
     const jar = rj.jar;
-    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    if (!plugin.loggedIn(jar)) { await auditReadOutcome(t, plugin.id, "feed", "not-logged-in"); return json({ error: "jar present but not logged in" }, 409); }
     const target = url.searchParams.get("url") || plugin.renderUrl ||
       `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
     try {
@@ -1102,6 +1124,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       await audit("feed", { plugin: plugin.id, count: items.length, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, who, items });
     } catch (e) {
+      await auditReadOutcome(t, plugin.id, "feed", "error", (e as Error).message);
       return json({ error: (e as Error).message }, 502);
     }
   }
@@ -1158,9 +1181,9 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       const denied = await gateRead(t, plugin.id, nr.kind, bearer); if (denied) return denied;
       const subj = jarSubject(t);
       if (subj instanceof Response) return subj;
-      const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+      const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) { await auditReadOutcome(t, plugin.id, nr.kind, "no-jar"); return rj.resp; }
       const jar = rj.jar;
-      if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+      if (!plugin.loggedIn(jar)) { await auditReadOutcome(t, plugin.id, nr.kind, "not-logged-in"); return json({ error: "jar present but not logged in" }, 409); }
       try {
         const data = await nr.run(jar);
         if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
@@ -1169,6 +1192,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
         // Response shape preserved from the route this replaces: a list read answers { plugin, items }.
         return json(Array.isArray(data) ? { plugin: plugin.id, items: data } : { plugin: plugin.id, data });
       } catch (e) {
+        await auditReadOutcome(t, plugin.id, nr.kind, "error", (e as Error).message);
         return json({ error: (e as Error).message }, 502);
       }
     }
@@ -1187,15 +1211,16 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const denied = await gateRead(t, plugin.id, "live", bearer); if (denied) return denied;
     const subj = jarSubject(t);
     if (subj instanceof Response) return subj;
-    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) { await auditReadOutcome(t, plugin.id, "live", "no-jar"); return rj.resp; }
     const jar = rj.jar;
-    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    if (!plugin.loggedIn(jar)) { await auditReadOutcome(t, plugin.id, "live", "not-logged-in"); return json({ error: "jar present but not logged in" }, 409); }
     try {
       const data = await plugin.live(jar, Number(url.searchParams.get("after") || "0") || 0);
       if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       await audit("live", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, data });
     } catch (e) {
+      await auditReadOutcome(t, plugin.id, "live", "error", (e as Error).message);
       return json({ error: (e as Error).message }, 502);
     }
   }
@@ -1213,17 +1238,19 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const denied = await gateRead(t, plugin.id, "frame", bearer); if (denied) return denied;
     const subj = jarSubject(t);
     if (subj instanceof Response) return subj;
-    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) { await auditReadOutcome(t, plugin.id, "frame", "no-jar"); return rj.resp; }
     const jar = rj.jar;
-    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    if (!plugin.loggedIn(jar)) { await auditReadOutcome(t, plugin.id, "frame", "not-logged-in"); return json({ error: "jar present but not logged in" }, 409); }
     let target: string;
     try { target = atob((url.searchParams.get("u") || "").replace(/-/g, "+").replace(/_/g, "/")); }
     catch { return json({ error: "bad frame url" }, 400); }
     try {
       const { bytes, contentType } = await plugin.fetchFrame(jar, target);
       if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
+      await audit("frame", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
       return new Response(bytes as unknown as BodyInit, { headers: { "Content-Type": contentType, "Access-Control-Allow-Origin": "*" } });
     } catch (e) {
+      await auditReadOutcome(t, plugin.id, "frame", "error", (e as Error).message);
       return json({ error: (e as Error).message }, 502);
     }
   }
@@ -1240,9 +1267,9 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     // A scoped token reads its own subject's jar; the owner secret reads owner's.
     const subj = jarSubject(t);
     if (subj instanceof Response) return subj;
-    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) { await auditReadOutcome(t, plugin.id, "items", "no-jar"); return rj.resp; }
     const jar = rj.jar;
-    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    if (!plugin.loggedIn(jar)) { await auditReadOutcome(t, plugin.id, "items", "not-logged-in"); return json({ error: "jar present but not logged in" }, 409); }
 
     // Step-up gate now lives in gateRead at the read chokepoint (RFC 0005); first-use is
     // cleared by recordTokenUse below only after a successful read.
@@ -1268,9 +1295,10 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
       }
       const items = await plugin.listItems(jar, listOpts);
       await recordUse();
-      await audit("read", { plugin: plugin.id, item: "list", by });
+      await audit("read", { plugin: plugin.id, item: "list", count: items.length, by });
       return json({ plugin: plugin.id, items, data: items });
     } catch (e) {
+      await auditReadOutcome(t, plugin.id, "items", "error", (e as Error).message);
       return json({ error: (e as Error).message }, 502);
     }
   }
@@ -1290,15 +1318,16 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const denied = await gateRead(t, plugin.id, "account", bearer); if (denied) return denied;
     const subj = jarSubject(t);
     if (subj instanceof Response) return subj;
-    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) { await auditReadOutcome(t, plugin.id, "account", "no-jar"); return rj.resp; }
     const jar = rj.jar;
-    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    if (!plugin.loggedIn(jar)) { await auditReadOutcome(t, plugin.id, "account", "not-logged-in"); return json({ error: "jar present but not logged in" }, 409); }
     try {
       const data = await plugin.account(jar);
       if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       await audit("account", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, account: data });
     } catch (e) {
+      await auditReadOutcome(t, plugin.id, "account", "error", (e as Error).message);
       return json({ error: (e as Error).message }, 502);
     }
   }
@@ -1319,15 +1348,16 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const denied = await gateRead(t, plugin.id, "quota", bearer); if (denied) return denied;
     const subj = jarSubject(t);
     if (subj instanceof Response) return subj;
-    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) return rj.resp;
+    const rj = readJar(subj, plugin.id, t?.account || url.searchParams.get("account") || undefined); if (!rj.ok) { await auditReadOutcome(t, plugin.id, "quota", "no-jar"); return rj.resp; }
     const jar = rj.jar;
-    if (!plugin.loggedIn(jar)) return json({ error: "jar present but not logged in" }, 409);
+    if (!plugin.loggedIn(jar)) { await auditReadOutcome(t, plugin.id, "quota", "not-logged-in"); return json({ error: "jar present but not logged in" }, 409); }
     try {
       const data = await plugin.quota(jar);
       if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       await audit("quota", { plugin: plugin.id, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, data });
     } catch (e) {
+      await auditReadOutcome(t, plugin.id, "quota", "error", (e as Error).message);
       return json({ error: (e as Error).message }, 502);
     }
   }

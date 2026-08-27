@@ -6,6 +6,8 @@ import { initTokens, mint } from "./tokens.ts";
 import { assertEquals, assertExists } from "jsr:@std/assert@~1.0.0";
 import { getPlugin } from "./plugins/registry.ts";
 import { allJars, deleteJar, setJar } from "./vault.ts";
+import { auditLog } from "./audit.ts";
+import { recordTokenUse } from "./stepup.ts";
 
 const TEST_ENV = {
   OAUTH3_OWNER_SECRET: "test-owner-secret",
@@ -474,6 +476,74 @@ Deno.test("handler: connect approval satisfies first-use step-up, direct mint do
       id: "connected-item",
       title: "Connected item",
     }]);
+  } finally {
+    plugin.loggedIn = origLoggedIn;
+    plugin.listItems = origListItems;
+  }
+});
+
+// #52 — every scoped read leaves exactly one outcome row however it ends. The `gate` row
+// records the attempt; before the fix only successful reads got a further row, so a 409
+// (no jar / not logged in) or a 502 (read error) left failed credential USE with no trace.
+// auditLog() is newest-first; rowsSince() isolates what one read added.
+Deno.test("handler: failed reads leave exactly one read.outcome row (#52)", async () => {
+  await callHandler("GET", "/api/health"); // init
+  const count = () => auditLog().length;
+  const rowsSince = (n: number) => auditLog().slice(0, auditLog().length - n);
+
+  // no-jar (409) with a scoped token — `by` must attribute the app, not the subject.
+  const tok = await mint("otter", "u-nojar-52", "demo-app");
+  await recordTokenUse(tok.token, "otter"); // clear first-use step-up so the read reaches the jar lookup
+  let n = count();
+  const noJar = await callHandler("GET", "/api/otter/items", undefined, {
+    Authorization: `Bearer ${tok.token}`,
+  });
+  assertEquals(noJar.status, 409);
+  assertEquals((noJar.json as { error: string }).error, "no jar synced for otter");
+  let rows = rowsSince(n).filter((r) => r.action === "read.outcome");
+  assertEquals(rows.length, 1); // exactly one outcome row
+  assertEquals(rows[0].detail, { plugin: "otter", readKind: "items", outcome: "no-jar", by: "demo-app" });
+
+  const plugin = getPlugin("otter")!;
+  const origLoggedIn = plugin.loggedIn;
+  const origListItems = plugin.listItems;
+  try {
+    // not-logged-in (409) — jar present, loggedIn false.
+    plugin.loggedIn = () => false;
+    await setJar("owner", "otter", "default", { session: "x" });
+    n = count();
+    const stale = await ownerReq("GET", "/api/otter/items");
+    assertEquals(stale.status, 409);
+    assertEquals((stale.json as { error: string }).error, "jar present but not logged in");
+    rows = rowsSince(n).filter((r) => r.action === "read.outcome");
+    assertEquals(rows.length, 1);
+    assertEquals(rows[0].detail, { plugin: "otter", readKind: "items", outcome: "not-logged-in", by: "owner" });
+
+    // error (502) — the read itself throws; the row carries the message.
+    plugin.loggedIn = () => true;
+    plugin.listItems = () => Promise.reject(new Error("boom-52"));
+    n = count();
+    const failed = await ownerReq("GET", "/api/otter/items");
+    assertEquals(failed.status, 502);
+    assertEquals((failed.json as { error: string }).error, "boom-52");
+    rows = rowsSince(n).filter((r) => r.action === "read.outcome");
+    assertEquals(rows.length, 1);
+    assertEquals(rows[0].detail, { plugin: "otter", readKind: "items", outcome: "error", message: "boom-52", by: "owner" });
+
+    // ok (200) — NO read.outcome row (that would be a second outcome); the success `read`
+    // row carries the count, and the `gate` row is unchanged.
+    plugin.listItems = () => Promise.resolve([{ id: "a", title: "A" }, { id: "b", title: "B" }]);
+    n = count();
+    const ok = await ownerReq("GET", "/api/otter/items");
+    assertEquals(ok.status, 200);
+    rows = rowsSince(n);
+    assertEquals(rows.filter((r) => r.action === "read.outcome").length, 0);
+    const readRow = rows.find((r) => r.action === "read");
+    assertExists(readRow);
+    assertEquals(readRow.detail, { plugin: "otter", item: "list", count: 2, by: "owner" });
+    const gateRow = rows.find((r) => r.action === "gate");
+    assertExists(gateRow);
+    assertEquals(gateRow.detail, { plugin: "otter", readKind: "items", decision: "allow", by: "owner" });
   } finally {
     plugin.loggedIn = origLoggedIn;
     plugin.listItems = origListItems;
