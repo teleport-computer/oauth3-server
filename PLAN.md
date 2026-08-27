@@ -1,36 +1,21 @@
-# PLAN — issue #52: failed/attempted credential reads leave no trace
+# PLAN — issue #67: signed-in users reach the dashboard in one click
 
-Base: `origin/staging` (bc07af6). Branch: `staging-oa-52`.
+From the issue `## Acceptance`:
 
-## Diagnosis (verified against current code — line numbers moved since filing)
-`gateRead` writes the `gate` allow row (attempt), but every read route returns without a row on
-failure: `readJar` !ok → 409 "no jar synced", `!plugin.loggedIn(jar)` → 409 "jar present but not
-logged in", catch → 502. Only successes audit (`read`/`feed`/`account`/`quota`/`live`/`screenshot`/
-`nr.kind`; `frame` audits nothing even on success). 8 gateRead routes total.
+- [ ] AC1: Signed in (valid `oauth3_session`), `/oauth3/` primary CTA reads "Go to your
+      dashboard"; one click lands on `/oauth3/dashboard`.
+- [ ] AC2: Signed out, `/oauth3/` unchanged — "Sign in to this pod" → `/oauth3/login`.
+- [ ] AC3: Footer "Sign in" link consistent with rendered state — no page shows both a
+      sign-in CTA and a signed-in CTA.
 
-## Changes
-- [x] Add `auditReadOutcome(t, plugin, readKind, outcome, message?)` next to `gateRead` — writes
-      one `read.outcome` row `{plugin, readKind, outcome, message?, by}` (same `by` attribution
-      as existing rows).
-- [x] Instrument all 8 chokepoint routes' three failure exits: `no-jar`, `not-logged-in`,
-      `error` (with the thrown message).
-- [x] `frame` success now audits `frame` (it produced zero rows even on success).
-- [x] items list success row carries `count` (ok outcome = "ok (with count)" per Acceptance).
-- [x] Tests in `server/handler_test.ts`: no-jar 409 → exactly one `read.outcome` row (by=app);
-      not-logged-in 409 → row; 502 → row with message; success → NO `read.outcome` row and the
-      `gate` row unchanged.
-
-## Acceptance → evidence
-- [x] Three reads on deployed staging as u-swarm via connect→approve (demo-app): ok (reddit
-      /items 200, count 51), no-jar (reddit /items?account=no-such-account 409 — every
-      demo-app-listed plugin has a live jar, so the no-jar branch is hit via an unresolvable
-      account; same `readJar !ok` code path), error (nytimes /items 502 — NYT datadome blocks
-      server-side replay, a real pre-existing failure).
-- [x] `GET /oauth3/api/audit` transcript with the three outcome rows + `/_api/version` ==
-      af843df — .evidence/issue-52/transcript.md.
-- Tier 1.
-
-## Verify
-- [x] `deno check server/main.ts` clean
-- [x] `deno test` green (203 passed) → ~/paseo-batch/out/oa-52/test.log
-- [x] deploy via `bash ~/paseo-batch/deploy-staging-oauth3.sh staging-oa-52`, transcript collected
+## Steps
+- [ ] home-page.ts: `id=cta` on the primary CTA; inline script validates the localStorage
+      session via `api/me` (the dashboard's own idiom) and swaps CTA + footer link to
+      `dashboard` when signed in. Errors surface (no fallback).
+- [ ] handler_test.ts: GET / keeps the signed-out CTA and ships the swap script (AC2 + the
+      AC1/AC3 mechanism server-side; the rendered states are Tier 2 browser evidence).
+- [ ] `deno check server/main.ts` clean; `deno test` green → out/oa-67/test.log.
+- [ ] Deploy branch via `bash ~/paseo-batch/deploy-staging-oauth3.sh staging-oa-67`.
+- [ ] Tier 2 walk via envoy bridge (flock'd): signed-out shot → login as u-swarm → signed-in
+      `/` shot ("Go to your dashboard") → click → dashboard shot. → `.evidence/issue-67/`.
+- [ ] PR → staging, embed evidence, label `ready-to-merge` (gh api), issue `ready`→`in-review`.
