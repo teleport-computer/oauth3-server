@@ -2,10 +2,9 @@
 
 Acceptance checkboxes (from the issue):
 
-- [x] `GET /oauth3/api/youtube/items` on staging returns items carrying `date` as an ISO string,
-      with at least two distinct dates from two different day sections — **live transcript
-      BLOCKED on staging's egress (see PR/issue comment); parser verified offline against a
-      fixture with exactly that shape.**
+- [ ] `GET /oauth3/api/youtube/items` on staging returns items carrying `date` as an ISO string,
+      with at least two distinct dates from two different day sections — **not met: live
+      transcript blocked on staging egress (see the step below); parser verified offline only.**
 - [x] Items under a relative header resolve to a real date ("Today" → today's ISO date).
 - [x] A section whose header cannot be parsed leaves `date` unset and its items are still
       returned (no drop).
