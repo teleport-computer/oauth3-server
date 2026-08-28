@@ -29,3 +29,22 @@ jar; none exists on staging or in the swarm store. See BLOCKED in the PR body.
 ## checks on the rebased tree
 deno check server/main.ts — clean
 deno test --allow-net --allow-read --allow-write --allow-env — 188 passed | 0 failed
+
+## Rebase 2026-08-28 — rebased onto staging dfc02f0; live re-pin PENDING (staging outage)
+
+Staging moved 10 commits past the 08-18 rebase base (d62cc6c → dfc02f0), so the gate verdict
+(CONFLICTING — "rebase it, no new evidence needed") was actioned:
+
+- Rebased cleanly except commit 1: `server/plugins/youtube.ts` (staging's #173 `likedVideos`
+  module-function vs this PR's `extractPlayerResponse` at one insertion point — BOTH kept;
+  `registerRead` intact) and `PLAN.md` (staging's copy belonged to #67/#182 — this PR's plan
+  kept, per the convention the 08-18 rebase set). New tip after evidence re-pin: see `git log -1`.
+- `deno check server/main.ts` clean; `deno test --allow-net --allow-read --allow-write --allow-env`
+  **203 passed | 0 failed** (188 at the 08-18 rebase + 15 from staging's merged commits).
+- Deploy of the rebased tip for the live re-pin BLOCKED: the 2026-08-28 staging outage (see the
+  PR's 2026-08-28 comment — deploy-script/env-redaction incident; `/oauth3/api/health` 500 until
+  the operator restores the live SEAL_KEY). The 2026-08-18 live transcript above names SHAs that
+  the rebase orphaned; it stands as the record of THAT run, not as a current pin.
+- Next tick after the operator restore: redeploy this branch via `deploy.sh`, re-run the
+  criterion-2 read (bogus id → 502 per-id error) + the criterion-1 chain if the jar exists,
+  and re-pin `/_api/version` here.
