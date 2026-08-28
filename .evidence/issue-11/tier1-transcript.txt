@@ -1,0 +1,50 @@
+# Tier 1 transcript — issue #11 — rebased branch, 2026-08-18
+
+Prior run (2026-08-15, pre-rebase tip 6b57609) showed identical behavior; that commit was
+orphaned by the rebase onto staging, so this transcript re-pins everything at 5ab1a5b.
+
+## $ curl -s $B/oauth3/_api/version
+{"service":"oauth3-server","commit":"5ab1a5b"}
+
+## $ curl $B/oauth3/api/youtube/items/ZZZZZZZZZZZ  (bogus id — acceptance criterion 2)
+{"error":"youtube item ZZZZZZZZZZZ: This video is unavailable"}
+# HTTP 502
+
+## $ curl $B/oauth3/api/youtube/items/jNQXAC9IVRw  (real id; jar-authed InnerTube player)
+{"error":"youtube item jNQXAC9IVRw: Sign in to confirm you're not a bot"}
+# HTTP 502  — honest error: the staged jar's SAPISID does not authenticate (session is dead)
+
+## list read (acceptance step 1) after seeding the best available jar:
+$ POST /api/cookies {"plugin":"youtube",<31 distinct cookies from ~/.paseo-secrets/jars/youtube.com.json (snapshot 2026-08-14)>}
+{"ok":true,"plugin":"youtube","account":"default","count":31}
+$ GET /oauth3/api/youtube/items   (scoped token, step-up challenge self-approved)
+{"error":"youtube returned not-logged-in — cookies expired"}
+# HTTP 502
+
+The 2026-08-14 swarm-store snapshot is itself dead — verified from the worker box (not the TEE,
+removing the egress-IP variable) by replaying it at https://www.youtube.com/feed/history:
+ytInitialData.serviceTrackingParams logged_in = 0. Criterion 1's live check needs a logged-in
+jar; none exists on staging or in the swarm store. See BLOCKED in the PR body.
+
+## checks on the rebased tree
+deno check server/main.ts — clean
+deno test --allow-net --allow-read --allow-write --allow-env — 188 passed | 0 failed
+
+## Rebase 2026-08-28 — rebased onto staging dfc02f0; live re-pin PENDING (staging outage)
+
+Staging moved 10 commits past the 08-18 rebase base (d62cc6c → dfc02f0), so the gate verdict
+(CONFLICTING — "rebase it, no new evidence needed") was actioned:
+
+- Rebased cleanly except commit 1: `server/plugins/youtube.ts` (staging's #173 `likedVideos`
+  module-function vs this PR's `extractPlayerResponse` at one insertion point — BOTH kept;
+  `registerRead` intact) and `PLAN.md` (staging's copy belonged to #67/#182 — this PR's plan
+  kept, per the convention the 08-18 rebase set). New tip after evidence re-pin: see `git log -1`.
+- `deno check server/main.ts` clean; `deno test --allow-net --allow-read --allow-write --allow-env`
+  **203 passed | 0 failed** (188 at the 08-18 rebase + 15 from staging's merged commits).
+- Deploy of the rebased tip for the live re-pin BLOCKED: the 2026-08-28 staging outage (see the
+  PR's 2026-08-28 comment — deploy-script/env-redaction incident; `/oauth3/api/health` 500 until
+  the operator restores the live SEAL_KEY). The 2026-08-18 live transcript above names SHAs that
+  the rebase orphaned; it stands as the record of THAT run, not as a current pin.
+- Next tick after the operator restore: redeploy this branch via `deploy.sh`, re-run the
+  criterion-2 read (bogus id → 502 per-id error) + the criterion-1 chain if the jar exists,
+  and re-pin `/_api/version` here.
