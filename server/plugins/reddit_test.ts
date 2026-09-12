@@ -54,7 +54,7 @@ function mockReddit(req: Request): Response {
   if (u.pathname === "/api/me.json") return Response.json(ME);
   if (u.pathname === "/r/test/hot.json") {
     return new Response(JSON.stringify({ data: { children: [{ kind: "t3", data: LISTED }] } }), {
-      headers: { "Content-Type": "application/json", "x-ratelimit-used": "3", "x-ratelimit-remaining": "97" },
+      headers: { "Content-Type": "application/json", "x-ratelimit-used": "3", "x-ratelimit-remaining": "97", "x-ratelimit-reset": "530" },
     });
   }
   if (u.pathname === "/search.json") {
@@ -67,7 +67,7 @@ function mockReddit(req: Request): Response {
       ? [{ kind: "t3", data: { ...LISTED, id: "subq", title: "a sub-restricted hit" } }]
       : [];
     return new Response(JSON.stringify({ data: { children } }), {
-      headers: { "Content-Type": "application/json", "x-ratelimit-used": "4", "x-ratelimit-remaining": "96" },
+      headers: { "Content-Type": "application/json", "x-ratelimit-used": "4", "x-ratelimit-remaining": "96", "x-ratelimit-reset": "520" },
     });
   }
   if (u.pathname.startsWith("/user/") && u.pathname.endsWith("/saved.json")) {
@@ -136,7 +136,7 @@ Deno.test("reddit read: listing and search preserve item shape and rate limits",
     id: "abc", title: "a listed post", score: 42, num_comments: 7, created: 1700000000,
     permalink: "/r/test/abc", url: "https://example.com/abc", author: "poster", subreddit: "test",
   });
-  assertEquals(listing.rateLimitHeaders, { "x-ratelimit-used": "3", "x-ratelimit-remaining": "97" });
+  assertEquals(listing.rateLimitHeaders, { "x-ratelimit-used": "3", "x-ratelimit-remaining": "97", "x-ratelimit-reset": "530" });
   const search = await redditPlugin.search!({ reddit_session: "x" }, "term", undefined, "relevance", 10);
   assertEquals(search.items.length, 1);
   assertEquals(search.rateLimitHeaders, {}); // absent upstream ⇒ absent downstream, never fabricated
@@ -145,7 +145,7 @@ Deno.test("reddit read: listing and search preserve item shape and rate limits",
 Deno.test("reddit read: search with sub takes /r/<sub>/search.json and sends restrict_sr", async () => {
   const subbed = await redditPlugin.search!({ reddit_session: "x" }, "term", "test", "relevance", 10);
   assertEquals(subbed.items[0].id, "subq"); // marker served only on the sub path with restrict_sr=1
-  assertEquals(subbed.rateLimitHeaders, { "x-ratelimit-used": "4", "x-ratelimit-remaining": "96" });
+  assertEquals(subbed.rateLimitHeaders, { "x-ratelimit-used": "4", "x-ratelimit-remaining": "96", "x-ratelimit-reset": "520" });
 });
 
 // --- handler / route tests (in-process; in-memory vault via dataDir: "") ---
@@ -237,6 +237,7 @@ Deno.test("reddit read: reddit:read permits listings but not account/items", asy
   assertEquals(subbed.status, 200);
   assertEquals((await subbed.json()).items[0].id, "subq");
   assertEquals(subbed.headers.get("x-ratelimit-used"), "4"); // verbatim pass-through on the wire
+  assertEquals(subbed.headers.get("x-ratelimit-reset"), "520");
   assertEquals((await call("GET", "/api/reddit/account", { bearer: t.token })).status, 403);
   assertEquals((await call("GET", "/api/reddit/items", { bearer: t.token })).status, 403);
 });
