@@ -5,7 +5,7 @@ import handler from "./handler.ts";
 import { initTokens, mint } from "./tokens.ts";
 import { assertEquals, assertExists } from "jsr:@std/assert@~1.0.0";
 import { getPlugin } from "./plugins/registry.ts";
-import { allJars, deleteJar, setJar } from "./vault.ts";
+import { allJars, deleteJar, getJar, jarsFor, setJar } from "./vault.ts";
 import { auditLog } from "./audit.ts";
 import { recordTokenUse } from "./stepup.ts";
 
@@ -573,4 +573,46 @@ Deno.test("handler: failed reads leave exactly one read.outcome row (#52)", asyn
     plugin.loggedIn = origLoggedIn;
     plugin.listItems = origListItems;
   }
+});
+
+// --- issue #51: cookies.sync audits on CHANGE, not on every sync ---
+// The extension heartbeats an unchanged jar on a tight loop; those repeats must be no-ops.
+Deno.test("handler: POST /api/cookies — identical re-syncs write nothing; a changed jar persists + audits once (#51)", async () => {
+  const subj = "owner";
+  // the issue's exact example: a 42-cookie youtube jar
+  const jar: Record<string, string> = {};
+  for (let i = 0; i < 42; i++) jar[`yt${i}`] = `v${i}`;
+  const syncRows = () =>
+    auditLog().filter((e) =>
+      e.action === "cookies.sync" && e.detail?.subject === subj && e.detail?.plugin === "youtube" && e.detail?.account === "default"
+    );
+
+  // three identical syncs — one row, not three
+  const before = syncRows().length;
+  for (let i = 0; i < 3; i++) {
+    const { status, json } = await ownerReq("POST", "/api/cookies", { plugin: "youtube", cookies: jar });
+    assertEquals(status, 200);
+    assertEquals((json as { ok: boolean }).ok, true);
+  }
+  assertEquals(syncRows().length, before + 1);
+  assertEquals(syncRows()[0].detail, { subject: subj, plugin: "youtube", account: "default", count: 42 });
+
+  // the repeats wrote no vault state either: updatedAt is the last CHANGE, not the last sync
+  const updated = jarsFor(subj, "youtube")[0].updatedAt;
+
+  // a different key insertion order is the same jar (chrome.cookies.getAll order is not stable)
+  const reordered: Record<string, string> = {};
+  for (const name of Object.keys(jar).reverse()) reordered[name] = jar[name];
+  await ownerReq("POST", "/api/cookies", { plugin: "youtube", cookies: reordered });
+  assertEquals(syncRows().length, before + 1);
+  assertEquals(jarsFor(subj, "youtube")[0].updatedAt, updated);
+
+  // a changed cookie persists and audits exactly once more, with full detail
+  const changed = { ...jar, yt0: "rotated" };
+  const { status, json } = await ownerReq("POST", "/api/cookies", { plugin: "youtube", cookies: changed });
+  assertEquals(status, 200);
+  assertEquals((json as { count: number }).count, 42);
+  assertEquals(syncRows().length, before + 2);
+  assertEquals(getJar(subj, "youtube", "default"), changed);
+  assertEquals(syncRows()[0].detail, { subject: subj, plugin: "youtube", account: "default", count: 42 });
 });

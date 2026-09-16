@@ -581,8 +581,12 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     } catch (e) {
       return json({ error: `cannot derive account: ${(e as Error).message}` }, 400);
     }
-    await setJar(subj, plugin.id, account, body.cookies);
-    await audit("cookies.sync", { subject: subj, plugin: plugin.id, account, count: Object.keys(body.cookies).length });
+    // #51 — audit on change, not on every sync: an identical re-sync (the extension
+    // heartbeats an unchanged jar on a tight loop) writes no vault state via setJar and
+    // no audit row here — the log carries signal, not heartbeat.
+    if (await setJar(subj, plugin.id, account, body.cookies)) {
+      await audit("cookies.sync", { subject: subj, plugin: plugin.id, account, count: Object.keys(body.cookies).length });
+    }
     return json({ ok: true, plugin: plugin.id, account, count: Object.keys(body.cookies).length });
   }
 

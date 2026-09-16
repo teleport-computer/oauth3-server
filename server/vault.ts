@@ -109,9 +109,24 @@ async function persist(): Promise<void> {
   await Deno.writeFile(file, out);
 }
 
-export async function setJar(subject: string, plugin: string, account: string, jar: Jar): Promise<void> {
-  store[keyOf(subject, plugin, account)] = { jar, updatedAt: Date.now() };
+// #51 — a jar is its name→value pairs, not its key insertion order: the extension rebuilds
+// the object from chrome.cookies.getAll on every sync and that order is not stable, so an
+// order-sensitive compare (JSON.stringify) would report a phantom change on every heartbeat.
+function jarEquals(a: Jar, b: Jar): boolean {
+  const names = Object.keys(a);
+  return names.length === Object.keys(b).length && names.every((n) => a[n] === b[n]);
+}
+
+// #51 — returns whether the stored jar CHANGED. An identical re-sync is not a change: no
+// store update, no persist, no updatedAt bump, so callers can skip the audit row too —
+// that skip is what stops the cookies.sync flood at its source.
+export async function setJar(subject: string, plugin: string, account: string, jar: Jar): Promise<boolean> {
+  const k = keyOf(subject, plugin, account);
+  const existing = store[k];
+  if (existing && jarEquals(existing.jar, jar)) return false;
+  store[k] = { jar, updatedAt: Date.now() };
   await persist();
+  return true;
 }
 
 // `account` omitted → back-compat resolution: exactly one jar for (subject, plugin)
