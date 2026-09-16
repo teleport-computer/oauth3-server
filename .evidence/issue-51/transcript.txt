@@ -1,0 +1,48 @@
+== issue #51 — Tier-1 transcript: identical re-syncs write nothing; a change writes once
+== instance: locally-booted oauth3-server, GIT_SHA pinned to this PR's commit
+{"service":"oauth3-server","commit":"eeb05bbcc9b68904b66d817663adc419780c32ce"}
+
+== POST /api/cookies  sync 1/3 (identical 42-cookie youtube jar, session subject)
+  {"ok":true,"plugin":"youtube","account":"default","count":42} | HTTP 200
+  [after sync 1] vault.sealed sha256[:16]=1cbc36d375448d72  audit.json sha256[:16]=5517bceab93c00df
+== POST /api/cookies  sync 2/3 (identical 42-cookie youtube jar, session subject)
+  {"ok":true,"plugin":"youtube","account":"default","count":42} | HTTP 200
+  [after sync 2] vault.sealed sha256[:16]=1cbc36d375448d72  audit.json sha256[:16]=5517bceab93c00df
+== POST /api/cookies  sync 3/3 (identical 42-cookie youtube jar, session subject)
+  {"ok":true,"plugin":"youtube","account":"default","count":42} | HTTP 200
+  [after sync 3] vault.sealed sha256[:16]=1cbc36d375448d72  audit.json sha256[:16]=5517bceab93c00df
+== POST /api/cookies  sync 4/4 (SAME jar, key insertion order REVERSED — chrome.cookies.getAll order is not stable)
+  {"ok":true,"plugin":"youtube","account":"default","count":42} | HTTP 200
+  [after reordered] vault.sealed sha256[:16]=1cbc36d375448d72  audit.json sha256[:16]=5517bceab93c00df
+
+== GET /api/audit — cookies.sync rows for youtube after 4 unchanged syncs: 1
+[
+ {
+  "ts": 1789599400418,
+  "action": "cookies.sync",
+  "detail": {
+   "subject": "u-fde3c1cc5f671e72d2d7aba054533897",
+   "plugin": "youtube",
+   "account": "default",
+   "count": 42
+  }
+ }
+]
+   (vault.sealed + audit.json digests identical across syncs 2-4: no store write, no audit write)
+
+== POST /api/cookies  sync 5 (ONE changed cookie: yt0 -> rotated)
+  {"ok":true,"plugin":"youtube","account":"default","count":42} | HTTP 200
+  [after change] vault.sealed sha256[:16]=6262160e3e6605c0  audit.json sha256[:16]=508b7ca7a6b279c3
+== GET /api/audit — cookies.sync rows for youtube after the change: 2
+{
+ "ts": 1789599400439,
+ "action": "cookies.sync",
+ "detail": {
+  "subject": "u-fde3c1cc5f671e72d2d7aba054533897",
+  "plugin": "youtube",
+  "account": "default",
+  "count": 42
+ }
+}
+== GET /api/jars (owner) — the persisted youtube jar for this subject:
+  {"subject": "u-fde3c1cc5f671e72d2d7aba054533897", "plugin": "youtube", "account": "default", "updatedAt": 1789599400439, "count": 42}
