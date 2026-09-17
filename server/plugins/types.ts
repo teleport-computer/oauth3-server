@@ -2,10 +2,10 @@
 // cookie jar for that site (synced by the extension) and the plugin turns it into
 // list/fetch reads. This is the seam openfeedling's `shortCheck(cookies)` became.
 
-import type { CapabilityStatement, Jar } from "../types.ts";
+import type { CapabilityStatement, CookieRecord, Jar } from "../types.ts";
 
 // Re-export Jar for backward compatibility with imports from "./plugins/types.ts"
-export type { Jar };
+export type { Jar, CookieRecord };
 
 export interface PluginItem {
   id: string;
@@ -118,4 +118,24 @@ export interface Plugin {
 
 export function cookieHeader(jar: Jar): string {
   return Object.entries(jar).map(([k, v]) => `${k}=${v}`).join("; ");
+}
+
+// #53: project full-fidelity cookie records onto the flat Jar. The flat Jar is the read
+// credential with same-origin semantics — exactly the cookies a browser would send to the
+// plugin's first cookieDomain — so a cookie is included when its domain equals that domain
+// or is a parent/child of it (chrome's domain-match rule). For a multi-domain jar (youtube:
+// .youtube.com + .google.com) this keeps youtube.com's own values — the same guarantee
+// b51d5c7 bought by excluding .google.com — while the records array retains everything for
+// the browser SPI. First record wins a duplicate name.
+export function jarFromCookieRecords(plugin: Plugin, records: CookieRecord[]): Jar {
+  const primary = plugin.cookieDomains[0].replace(/^\./, "").toLowerCase();
+  const applies = (cookieDomain: string) => {
+    const cd = cookieDomain.replace(/^\./, "").toLowerCase();
+    return cd === primary || cd.endsWith(`.${primary}`) || primary.endsWith(`.${cd}`);
+  };
+  const jar: Jar = {};
+  for (const c of records) {
+    if (applies(c.domain) && jar[c.name] === undefined) jar[c.name] = c.value;
+  }
+  return jar;
 }

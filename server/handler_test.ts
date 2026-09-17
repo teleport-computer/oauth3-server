@@ -5,7 +5,7 @@ import handler from "./handler.ts";
 import { initTokens, mint } from "./tokens.ts";
 import { assertEquals, assertExists } from "jsr:@std/assert@~1.0.0";
 import { getPlugin } from "./plugins/registry.ts";
-import { allJars, deleteJar, setJar } from "./vault.ts";
+import { allJars, deleteJar, getJarEntry, setJar } from "./vault.ts";
 import { auditLog } from "./audit.ts";
 import { recordTokenUse } from "./stepup.ts";
 
@@ -573,4 +573,45 @@ Deno.test("handler: failed reads leave exactly one read.outcome row (#52)", asyn
     plugin.loggedIn = origLoggedIn;
     plugin.listItems = origListItems;
   }
+});
+
+// #53 — POST /api/cookies accepts BOTH sync shapes. The flat {name:value} map is what the
+// deployed extension sends (unchanged); the full chrome.cookies objects array carries each
+// cookie's domain, which is what a multi-domain youtube jar needs. The array sync must also
+// derive the flat read jar with same-origin semantics (youtube's own values win the
+// same-name pairs; .google.com-only cookies stay out of the flat jar).
+Deno.test("handler #53: POST /api/cookies with full cookie objects stores records + derives the same-origin flat jar", async () => {
+  const cookies = [
+    { name: "SID", value: "g-sid", domain: ".google.com", path: "/", secure: true, httpOnly: true, sameSite: "lax" },
+    { name: "SAPISID", value: "g-sapisid", domain: ".google.com", path: "/", secure: true, httpOnly: true, sameSite: "lax" },
+    { name: "__Secure-3PSID", value: "g-3psid", domain: ".google.com", path: "/", secure: true, httpOnly: true, sameSite: "lax" },
+    { name: "SAPISID", value: "yt-sapisid", domain: ".youtube.com", path: "/", secure: true, httpOnly: false, sameSite: "no_restriction" },
+    { name: "YSC", value: "yt-ysc", domain: ".youtube.com", path: "/", secure: true, httpOnly: false, sameSite: "no_restriction" },
+  ];
+  const { status, json } = await ownerReq("POST", "/api/cookies", { plugin: "youtube", cookies });
+  assertEquals(status, 200);
+  // @ts-ignore - count = cookies ingested (5 records), not the flat jar (3)
+  assertEquals(json.count, 5);
+  const entry = getJarEntry("owner", "youtube", "default");
+  assertEquals(entry?.cookies?.length, 5);
+  // flat jar = what a browser sends to .youtube.com: youtube's SAPISID value, no google-only names
+  assertEquals(entry?.jar, { SAPISID: "yt-sapisid", YSC: "yt-ysc" });
+  // a cookie object without a domain is refused loudly — no silent default domain
+  const bad = await ownerReq("POST", "/api/cookies", { plugin: "youtube", cookies: [{ name: "SID", value: "x" }] });
+  assertEquals(bad.status, 400);
+  await deleteJar("owner", "youtube", "default");
+});
+
+Deno.test("handler #53: POST /api/cookies flat map (the deployed extension) stores no records, reads unchanged", async () => {
+  const { status, json } = await ownerReq("POST", "/api/cookies", {
+    plugin: "youtube",
+    cookies: { SAPISID: "yt-sapisid", YSC: "yt-ysc" },
+  });
+  assertEquals(status, 200);
+  // @ts-ignore - account derivation unchanged for youtube (no accountId hook)
+  assertEquals(json.account, "default");
+  const entry = getJarEntry("owner", "youtube", "default");
+  assertEquals(entry?.jar, { SAPISID: "yt-sapisid", YSC: "yt-ysc" });
+  assertEquals(entry?.cookies, undefined); // flat syncs keep today's behavior exactly
+  await deleteJar("owner", "youtube", "default");
 });

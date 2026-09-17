@@ -5,12 +5,18 @@
 // password; the jar arrives sealed from the plugin/CLI sync like every other read.
 
 import { Jar, Plugin } from "./plugins/types.ts";
+import type { CookieRecord } from "./types.ts";
 
 const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-// The vault stores name->value only, so domain/secure are reconstructed from the
-// plugin's cookieDomains. sameSite must be a chrome.cookies.set enum, not "None".
-function jarToCookies(plugin: Plugin, jar: Jar) {
+// Flat jars (the extension's name->value sync) carry no domain, so domain/secure are
+// reconstructed from the plugin's cookieDomains — correct for the single-domain syncs that
+// produce them. A jar synced with full cookie records (#53) keeps each cookie's real domain
+// (a youtube jar spans .youtube.com AND .google.com), so those pass through verbatim: the
+// SPI's /session feeds them straight to chrome.cookies.set, which is the only consumer that
+// can place a multi-domain session correctly. sameSite must be a chrome.cookies.set enum.
+function jarToCookies(plugin: Plugin, jar: Jar, cookies?: CookieRecord[]) {
+  if (cookies?.length) return cookies;
   const domain = plugin.cookieDomains[0];
   return Object.entries(jar).map(([name, value]) => ({
     name, value, domain, path: "/", secure: true, httpOnly: false, sameSite: "no_restriction",
@@ -69,9 +75,16 @@ function parseFeed(text: string): FeedItem[] {
   return items;
 }
 
-export async function browserFeed(spiUrl: string, plugin: Plugin, jar: Jar, targetUrl: string, secret = ""): Promise<{ who: string; items: FeedItem[] }> {
+export async function browserFeed(
+  spiUrl: string,
+  plugin: Plugin,
+  jar: Jar,
+  targetUrl: string,
+  secret = "",
+  cookies?: CookieRecord[],
+): Promise<{ who: string; items: FeedItem[] }> {
   if (!spiUrl) throw new Error("BROWSER_SPI_URL not configured — no browser SPI to drive");
-  await spi(spiUrl, "/session", { cookies: jarToCookies(plugin, jar), userAgent: UA }, secret); // inject the jar (like screenshot) — the SPI browser has no session otherwise
+  await spi(spiUrl, "/session", { cookies: jarToCookies(plugin, jar, cookies), userAgent: UA }, secret); // inject the jar (like screenshot) — the SPI browser has no session otherwise
   await spi(spiUrl, "/navigate", { url: targetUrl }, secret);
   await new Promise((res) => setTimeout(res, 4000));
   // Whose session this is — the SPI's logged-in user, so the app can label the feed.
@@ -80,9 +93,16 @@ export async function browserFeed(spiUrl: string, plugin: Plugin, jar: Jar, targ
   return { who: me.screen_name || "", items: parseFeed(r.text || "") };
 }
 
-export async function browserScreenshot(spiUrl: string, plugin: Plugin, jar: Jar, targetUrl: string, secret = "") {
+export async function browserScreenshot(
+  spiUrl: string,
+  plugin: Plugin,
+  jar: Jar,
+  targetUrl: string,
+  secret = "",
+  cookies?: CookieRecord[],
+) {
   if (!spiUrl) throw new Error("BROWSER_SPI_URL not configured — no browser SPI to drive");
-  await spi(spiUrl, "/session", { cookies: jarToCookies(plugin, jar), userAgent: UA }, secret);
+  await spi(spiUrl, "/session", { cookies: jarToCookies(plugin, jar, cookies), userAgent: UA }, secret);
   await spi(spiUrl, "/navigate", { url: targetUrl }, secret);
   await new Promise((res) => setTimeout(res, 5000)); // let logged-in XHR settle
   const cap = await spi(spiUrl, "/capture", {}, secret); // proof endpoint: url/title + saves artifact
@@ -114,9 +134,10 @@ export async function browserCaptureTrace(
   jar: Jar,
   targetUrl: string,
   secret = "",
+  cookies?: CookieRecord[],
 ) {
   if (!spiUrl) throw new Error("BROWSER_SPI_URL not configured — no browser SPI to drive");
-  await spi(spiUrl, "/session", { cookies: jarToCookies(plugin, jar), userAgent: UA }, secret);
+  await spi(spiUrl, "/session", { cookies: jarToCookies(plugin, jar, cookies), userAgent: UA }, secret);
   await spi(spiUrl, "/navigate", { url: targetUrl }, secret);
   await new Promise((res) => setTimeout(res, 5000)); // let logged-in XHR settle
   const t = await spi(spiUrl, "/capture-trace", {}, secret);

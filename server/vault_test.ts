@@ -193,3 +193,62 @@ Deno.test("vault #132: strandedJars returns jars whose subject differs from the 
   assertEquals(strandedJars(retired).some((s) => s.subject === current && s.plugin === "zai"), true);
   assertEquals(strandedJars(retired).some((s) => s.subject === retired), false);
 });
+
+// #53 — full-fidelity cookie records ride the sealed vault. A real YouTube jar spans
+// .youtube.com AND .google.com with SAME-NAME cookies holding different values per domain
+// (the b51d5c7 collision); the flat Jar cannot hold both, so the records travel as an array
+// next to it. This pins the on-disk round-trip: setJar writes them sealed, a fresh vault
+// instance reloads them with every domain intact, and the flat jar stays the same-origin
+// read credential (cookieDomains[0] semantics).
+Deno.test("vault #53: multi-domain cookie records round-trip through the sealed vault, domains distinct", async () => {
+  const KEY = "22".repeat(32);
+  const dir = await Deno.makeTempDir({ prefix: "oauth3-vault-cookies-" });
+  try {
+    const ytRecords = [
+      { name: "SID", value: "g-sid", domain: ".google.com" },
+      { name: "SAPISID", value: "g-sapisid", domain: ".google.com" },
+      { name: "__Secure-1PSID", value: "g-1psid", domain: ".google.com" },
+      { name: "__Secure-3PSID", value: "g-3psid", domain: ".google.com" },
+      { name: "SAPISID", value: "yt-sapisid", domain: ".youtube.com" },
+      { name: "__Secure-1PSID", value: "yt-1psid", domain: ".youtube.com" },
+      { name: "YSC", value: "yt-ysc", domain: ".youtube.com" },
+      { name: "VISITOR_INFO1_LIVE", value: "yt-visitor", domain: ".youtube.com" },
+    ];
+    const flat: Jar = {
+      SAPISID: "yt-sapisid",
+      "__Secure-1PSID": "yt-1psid",
+      YSC: "yt-ysc",
+      VISITOR_INFO1_LIVE: "yt-visitor",
+    };
+
+    // instance A: write the entry sealed to disk
+    const a = await import(`./vault.ts?rt-a=${Math.random()}`);
+    await a.initVault(dir, KEY);
+    await a.setJar("u-rt-53", "youtube", "default", flat, ytRecords);
+
+    // instance B: cold-load the same sealed file — records survive with domains distinct
+    const b = await import(`./vault.ts?rt-b=${Math.random()}`);
+    await b.initVault(dir, KEY);
+    const entry = b.getJarEntry("u-rt-53", "youtube", "default");
+    assertEquals(entry?.jar, flat);
+    assertEquals(entry?.cookies?.length, 8);
+    const domains = new Set(entry!.cookies!.map((c: { domain: string }) => c.domain));
+    assertEquals([...domains].sort(), [".google.com", ".youtube.com"]); // domains remain distinct
+    // same-name pairs coexist with their own values — the whole point of the array shape
+    const sapisids = entry!.cookies!.filter((c: { name: string }) => c.name === "SAPISID");
+    assertEquals(sapisids.map((c: { domain: string }) => c.domain).sort(), [".google.com", ".youtube.com"]);
+    assertEquals(sapisids.map((c: { value: string }) => c.value).sort(), ["g-sapisid", "yt-sapisid"]);
+    // getJar (the read credential) is unchanged; the directory counts the flat jar
+    assertEquals(b.getJar("u-rt-53", "youtube"), flat);
+    assertEquals(b.jarsFor("u-rt-53", "youtube")[0].count, 4);
+    // export/import carries the records (the self-host migration path)
+    const exported = b.entriesForExport("u-rt-53");
+    assertEquals(exported.length, 1);
+    await b.deleteEntries("u-rt-53");
+    assertEquals(b.getJarEntry("u-rt-53", "youtube"), null);
+    assertEquals(await b.installEntries("u-rt-53", exported), 1);
+    assertEquals(b.getJarEntry("u-rt-53", "youtube")?.cookies, ytRecords);
+  } finally {
+    await Deno.remove(dir, { recursive: true }).catch(() => {});
+  }
+});
