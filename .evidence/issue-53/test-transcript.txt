@@ -1,0 +1,7 @@
+browserScreenshot #53: /session places each stored cookie on its own domain, both SAPISIDs distinct ... ok (5s)
+browserScreenshot: flat jar (no records) still stamps cookieDomains[0] — the deployed extension's sync ... ok (5s)
+handler #53: POST /api/cookies with full cookie objects stores records + derives the same-origin flat jar ... ok (355µs)
+handler #53: POST /api/cookies flat map (the deployed extension) stores no records, reads unchanged ... ok (123µs)
+vault #53: multi-domain cookie records round-trip through the sealed vault, domains distinct ...
+vault #53: multi-domain cookie records round-trip through the sealed vault, domains distinct ... ok (4ms)
+ok | 213 passed | 0 failed (22s)

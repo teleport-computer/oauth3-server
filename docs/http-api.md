@@ -47,12 +47,23 @@ an expired jar as `409`, an unknown plugin as `404`, etc.
 
 ### `POST /api/cookies`
 - Auth: `session` **or** `owner`
-- Request:
-  ```json
-  { "plugin": "otter", "cookies": { "sessionid": "…", "csrftoken": "…" } }
-  ```
-- Response `200`: `{ "ok": true, "plugin": "otter", "count": 7 }`
-- `404` unknown plugin · `400` missing/invalid cookies · `401` no bearer
+- Request — two shapes (#53):
+  - Flat map (the extension's sync): `{ "plugin": "otter", "cookies": { "sessionid": "…", "csrftoken": "…" } }`
+  - Full cookie objects (multi-domain jars — each cookie keeps its real domain so the
+    browser SPI can place it correctly; the flat read jar is derived as the cookies a
+    browser sends to the plugin's first cookieDomain):
+    ```json
+    { "plugin": "youtube", "cookies": [
+      { "name": "SAPISID", "value": "…", "domain": ".google.com", "path": "/",
+        "secure": true, "httpOnly": true, "sameSite": "lax" },
+      { "name": "SAPISID", "value": "…", "domain": ".youtube.com", "path": "/",
+        "secure": true, "httpOnly": false, "sameSite": "no_restriction" }
+    ] }
+    ```
+- Response `200`: `{ "ok": true, "plugin": "otter", "account": "default", "count": 7 }`
+  (`count` = number of cookies ingested; a GET-side jar listing counts the flat jar)
+- `404` unknown plugin · `400` missing/invalid cookies (cookie objects need string `name`,
+  `value`, `domain`) · `401` no bearer
 
 ### `DELETE /api/cookies/:plugin`
 - Auth: `session` **or** `owner`. Query `?subject=<sub>` is honored **only** when the

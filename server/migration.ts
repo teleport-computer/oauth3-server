@@ -1,5 +1,6 @@
 import { x25519 } from "npm:@noble/curves@1.8.1/ed25519";
 import { didKeyToEd25519 } from "./identity.ts";
+import type { CookieRecord } from "./types.ts";
 
 export interface ExportedVaultEntry {
   plugin: string;
@@ -7,6 +8,7 @@ export interface ExportedVaultEntry {
   jar: Record<string, string>;
   updatedAt: number;
   status?: "migrating";
+  cookies?: CookieRecord[];
 }
 export interface MigrationBundle {
   version: 0;

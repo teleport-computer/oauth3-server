@@ -10,7 +10,20 @@ Deno.test("#153 migration bundle: source encrypts, destination decrypts and pres
     version: 0,
     subject,
     exportedAt: new Date().toISOString(),
-    vault: [{ plugin: "otter", account: "default", jar: { session: "opaque-cookie" }, updatedAt: 123 }],
+    vault: [
+      { plugin: "otter", account: "default", jar: { session: "opaque-cookie" }, updatedAt: 123 },
+      // #53: a multi-domain entry carries its cookie records; they must survive the envelope
+      {
+        plugin: "youtube",
+        account: "default",
+        jar: { SAPISID: "yt-sapisid" },
+        updatedAt: 123,
+        cookies: [
+          { name: "SAPISID", value: "g-sapisid", domain: ".google.com" },
+          { name: "SAPISID", value: "yt-sapisid", domain: ".youtube.com" },
+        ],
+      },
+    ],
     grants: [{ token: "tok-otter-migrated", plugin: "otter", subject, createdAt: 123 }],
     delegationJwts: [],
     provenance: { "otter:default": { capturedVia: "unknown" } },
@@ -20,6 +33,10 @@ Deno.test("#153 migration bundle: source encrypts, destination decrypts and pres
   const imported = await decryptMigration(envelope, destinationSecret);
   assertEquals(imported.subject, subject);
   assertEquals(imported.vault[0].jar.session, "opaque-cookie");
+  assertEquals(imported.vault[1].cookies, [
+    { name: "SAPISID", value: "g-sapisid", domain: ".google.com" },
+    { name: "SAPISID", value: "yt-sapisid", domain: ".youtube.com" },
+  ]);
   assertEquals(imported.grants[0].subject, subject);
   console.log("  PASS  two-instance migration transcript: encrypt(A) → decrypt/install(B), subject continuity preserved");
 });

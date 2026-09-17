@@ -7,6 +7,24 @@
 export type Jar = Record<string, string>;
 
 /**
+ * One cookie at full fidelity, as chrome.cookies.getAll returns it (#53). A real jar can
+ * hold SAME-NAME cookies on different domains with different values (youtube's
+ * __Secure-1PSID exists on both .youtube.com and .google.com), which a name-keyed Jar
+ * cannot represent — so these travel as an array, and the flat Jar remains the read
+ * credential (the cookies a browser sends to the plugin's first cookieDomain).
+ */
+export interface CookieRecord {
+  name: string;
+  value: string;
+  domain: string;
+  path?: string;
+  secure?: boolean;
+  httpOnly?: boolean;
+  sameSite?: string; // chrome.cookies enum: "no_restriction" | "lax" | "strict" | "unspecified"
+  expirationDate?: number; // seconds since epoch, as chrome.cookies reports
+}
+
+/**
  * A capability statement is generative prose plus a structured shadow.
  * The prose is what the user approves; the structure is what the machine
  * checks closure against. (RFC 0007 §2.1)

@@ -7,9 +7,9 @@
 // and a bot account coexist instead of clobbering). The account label is DERIVED from the
 // jar itself (plugin.accountId) at sync time — no user-supplied naming, no second identity.
 
-import { Jar } from "./plugins/types.ts";
+import { CookieRecord, Jar } from "./types.ts";
 
-interface Entry { jar: Jar; updatedAt: number; status?: "migrating"; }
+interface Entry { jar: Jar; updatedAt: number; status?: "migrating"; cookies?: CookieRecord[]; }
 
 // Thrown when a caller asks for a jar by (subject, plugin) alone but that identity holds
 // more than one account for that plugin. Never silently pick one — surface it to the
@@ -109,22 +109,39 @@ async function persist(): Promise<void> {
   await Deno.writeFile(file, out);
 }
 
-export async function setJar(subject: string, plugin: string, account: string, jar: Jar): Promise<void> {
-  store[keyOf(subject, plugin, account)] = { jar, updatedAt: Date.now() };
+// One (subject, plugin, account) entry, or null. The single/ambiguous account rule is
+// getJar's; this exposes the entry's optional cookie records (#53) alongside the flat jar.
+function resolveEntry(subject: string, plugin: string, account?: string): Entry | null {
+  if (account !== undefined) return store[keyOf(subject, plugin, account)] ?? null;
+  const matches = Object.entries(store).filter(([k]) => {
+    const p = parseKey(k);
+    return p.subject === subject && p.plugin === plugin;
+  });
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0][1];
+  throw new AmbiguousAccountError(subject, plugin, matches.map(([k]) => parseKey(k).account).sort());
+}
+
+export function getJarEntry(subject: string, plugin: string, account?: string): { jar: Jar; cookies?: CookieRecord[] } | null {
+  const e = resolveEntry(subject, plugin, account);
+  return e ? { jar: e.jar, ...(e.cookies ? { cookies: e.cookies } : {}) } : null;
+}
+
+export async function setJar(
+  subject: string,
+  plugin: string,
+  account: string,
+  jar: Jar,
+  cookies?: CookieRecord[],
+): Promise<void> {
+  store[keyOf(subject, plugin, account)] = { jar, updatedAt: Date.now(), ...(cookies ? { cookies } : {}) };
   await persist();
 }
 
 // `account` omitted → back-compat resolution: exactly one jar for (subject, plugin)
 // returns it; none returns null; MORE than one throws AmbiguousAccountError (never guess).
 export function getJar(subject: string, plugin: string, account?: string): Jar | null {
-  if (account !== undefined) return store[keyOf(subject, plugin, account)]?.jar ?? null;
-  const matches = Object.entries(store).filter(([k]) => {
-    const p = parseKey(k);
-    return p.subject === subject && p.plugin === plugin;
-  });
-  if (matches.length === 0) return null;
-  if (matches.length === 1) return matches[0][1].jar;
-  throw new AmbiguousAccountError(subject, plugin, matches.map(([k]) => parseKey(k).account).sort());
+  return resolveEntry(subject, plugin, account)?.jar ?? null;
 }
 
 // All accounts held by (subject, plugin) — replaces the single jarStatus. Empty when none.
@@ -190,6 +207,7 @@ export interface ExportedVaultEntry {
   jar: Jar;
   updatedAt: number;
   status?: "migrating";
+  cookies?: CookieRecord[];
 }
 
 // Export is intentionally a snapshot: callers receive the plaintext only in memory, then
@@ -199,7 +217,7 @@ export function entriesForExport(subject: string): ExportedVaultEntry[] {
     .filter(([k]) => parseKey(k).subject === subject)
     .map(([k, e]) => {
       const p = parseKey(k);
-      return { plugin: p.plugin, account: p.account, jar: e.jar, updatedAt: e.updatedAt, ...(e.status ? { status: e.status } : {}) };
+      return { plugin: p.plugin, account: p.account, jar: e.jar, updatedAt: e.updatedAt, ...(e.status ? { status: e.status } : {}), ...(e.cookies ? { cookies: e.cookies } : {}) };
     })
     .sort((a, b) => a.plugin.localeCompare(b.plugin) || a.account.localeCompare(b.account));
 }
@@ -219,8 +237,13 @@ export async function markMigrating(subject: string): Promise<number> {
 export async function installEntries(subject: string, entries: ExportedVaultEntry[]): Promise<number> {
   for (const entry of entries) {
     if (!entry || typeof entry.plugin !== "string" || typeof entry.account !== "string" ||
-      !entry.jar || typeof entry.jar !== "object") throw new Error("malformed vault entry");
-    store[keyOf(subject, entry.plugin, entry.account)] = { jar: entry.jar, updatedAt: entry.updatedAt };
+      !entry.jar || typeof entry.jar !== "object" ||
+      (entry.cookies !== undefined && !Array.isArray(entry.cookies))) throw new Error("malformed vault entry");
+    store[keyOf(subject, entry.plugin, entry.account)] = {
+      jar: entry.jar,
+      updatedAt: entry.updatedAt,
+      ...(entry.cookies ? { cookies: entry.cookies } : {}),
+    };
   }
   if (entries.length) await persist();
   return entries.length;

@@ -38,7 +38,7 @@
 import { allPlugins, getPlugin } from "./plugins/registry.ts";
 import { getRead } from "./reads.ts";
 import { configureEgress, egressFetch, egressProxy } from "./egress.ts";
-import { allJarStatuses, AmbiguousAccountError, deleteJar, deleteMigrating, entriesForExport, getJar, initVault, installEntries, jarsFor, markMigrating, setJar, strandedJars } from "./vault.ts";
+import { allJarStatuses, AmbiguousAccountError, deleteJar, deleteMigrating, entriesForExport, getJarEntry, initVault, installEntries, jarsFor, markMigrating, setJar, strandedJars } from "./vault.ts";
 import { importTokens, initTokens, listTokens, mint, revoke, revokeSubject, tokensForSubject, type Token, verify, verifyCap, verifiedCaps } from "./tokens.ts";
 import { approveConnect, createConnect, denyConnect, getConnect, initConnect, statusOf } from "./connect.ts";
 import { audit, auditLog, initAudit, pruneAudit } from "./audit.ts";
@@ -62,7 +62,8 @@ import { configureCodex } from "./plugins/codex.ts";
 import { amazonPlugin, configureAmazon } from "./plugins/amazon.ts";
 import { configureGoogleCalendar } from "./plugins/google-calendar.ts";
 import { configureZai } from "./plugins/zai.ts";
-import type { Jar, SubstituteOp } from "./plugins/types.ts";
+import type { CookieRecord, Jar, SubstituteOp } from "./plugins/types.ts";
+import { jarFromCookieRecords } from "./plugins/types.ts";
 import { initLinks, linkBind, linkResolve, linksFor, linkUnbind } from "./links.ts";
 import { verifySiwe } from "./siwe.ts";
 import { browserScreenshot, browserFeed } from "./browser.ts";
@@ -161,12 +162,12 @@ const isOwner = (req: Request) => !!ownerSecret && req.headers.get("Authorizatio
 // accounts for this plugin, none named) into a 409 carrying the available accounts so the
 // client can re-ask with ?account= or a token bound to one. Every token/owner read
 // chokepoint routes through here so ambiguity is surfaced, never silently resolved.
-type JarResolve = { ok: true; jar: Jar } | { ok: false; resp: Response };
+type JarResolve = { ok: true; jar: Jar; cookies?: CookieRecord[] } | { ok: false; resp: Response };
 function readJar(subj: string, pluginId: string, account?: string): JarResolve {
   try {
-    const jar = getJar(subj, pluginId, account);
-    if (!jar) return { ok: false, resp: json({ error: `no jar synced for ${pluginId}` }, 409) };
-    return { ok: true, jar };
+    const entry = getJarEntry(subj, pluginId, account);
+    if (!entry) return { ok: false, resp: json({ error: `no jar synced for ${pluginId}` }, 409) };
+    return { ok: true, jar: entry.jar, ...(entry.cookies ? { cookies: entry.cookies } : {}) };
   } catch (e) {
     if (e instanceof AmbiguousAccountError) {
       return {
@@ -573,17 +574,33 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const plugin = getPlugin(body?.plugin);
     if (!plugin) return json({ error: "unknown plugin" }, 404);
     if (!body?.cookies || typeof body.cookies !== "object") return json({ error: "missing cookies" }, 400);
+    // #53: `cookies` is either the extension's flat {name:value} map or the full
+    // chrome.cookies objects [{name,value,domain,…}] a multi-domain sync carries. Records
+    // keep each cookie's real domain for the browser SPI (youtube = .youtube.com +
+    // .google.com); the flat jar stays the same-origin read credential (cookieDomains[0]).
+    let jar: Jar;
+    let cookies: CookieRecord[] | undefined;
+    if (Array.isArray(body.cookies)) {
+      const bad = body.cookies.find((c: any) =>
+        typeof c?.name !== "string" || !c.name || typeof c?.value !== "string" ||
+        typeof c?.domain !== "string" || !c.domain);
+      if (bad) return json({ error: "cookie objects require string name, value and domain" }, 400);
+      cookies = body.cookies as CookieRecord[];
+      jar = jarFromCookieRecords(plugin, cookies);
+    } else {
+      jar = body.cookies as Jar;
+    }
     // #111: derive the account from the jar so a second account for the same plugin creates
     // a second jar instead of overwriting. A plugin without accountId keys under "default".
     let account: string;
     try {
-      account = plugin.accountId ? plugin.accountId(body.cookies) : "default";
+      account = plugin.accountId ? plugin.accountId(jar) : "default";
     } catch (e) {
       return json({ error: `cannot derive account: ${(e as Error).message}` }, 400);
     }
-    await setJar(subj, plugin.id, account, body.cookies);
-    await audit("cookies.sync", { subject: subj, plugin: plugin.id, account, count: Object.keys(body.cookies).length });
-    return json({ ok: true, plugin: plugin.id, account, count: Object.keys(body.cookies).length });
+    await setJar(subj, plugin.id, account, jar, cookies);
+    await audit("cookies.sync", { subject: subj, plugin: plugin.id, account, count: cookies?.length ?? Object.keys(jar).length });
+    return json({ ok: true, plugin: plugin.id, account, count: cookies?.length ?? Object.keys(jar).length });
   }
 
   // Self-host migration export. The bundle exists only in memory; the response is an envelope
@@ -1069,7 +1086,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const target = url.searchParams.get("url") || plugin.renderUrl ||
       `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
     try {
-      const shot = await browserScreenshot(browserSpiUrl, plugin, jar, target, browserSpiSecret);
+      const shot = await browserScreenshot(browserSpiUrl, plugin, jar, target, browserSpiSecret, rj.cookies);
       // Record token use after successful read (marks first-use as consumed)
       if (t && !isOwner(req)) {
         await recordTokenUse(bearer, plugin.id);
@@ -1119,7 +1136,7 @@ export default async function handler(req: Request, ctx: HandlerCtx): Promise<Re
     const target = url.searchParams.get("url") || plugin.renderUrl ||
       `https://www.${plugin.cookieDomains[0].replace(/^\./, "")}`;
     try {
-      const { who, items } = await browserFeed(browserSpiUrl, plugin, jar, target, browserSpiSecret);
+      const { who, items } = await browserFeed(browserSpiUrl, plugin, jar, target, browserSpiSecret, rj.cookies);
       if (t && !isOwner(req)) await recordTokenUse(bearer, plugin.id);
       await audit("feed", { plugin: plugin.id, count: items.length, by: t ? (t.app || t.subject || "token") : "owner" });
       return json({ plugin: plugin.id, who, items });
